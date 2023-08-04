@@ -1,13 +1,21 @@
 name: jtorrent
 description: BitTorrent client written in pure Dart
 version: 1.0.0
-# repository: https://github.com/my_org/my_repo
+repository: https://github.com/jiangtian616/jtorrent
+issue_tracker : https://github.com/jiangtian616/jtorrent/issues
+publish_to: https://pub.dev/
 
 environment:
-  sdk: ^3.0.6
+  sdk: ^3.0.0
 
 # Add regular dependencies here.
 dependencies:
+  jtorrent_bencoding: ^1.0.0
+  path: ^1.8.0
+
+dependency_overrides:
+  jtorrent_bencoding:
+    path: ../jtorrent_bencoding
 
 dev_dependencies:
   lints: ^2.0.0
