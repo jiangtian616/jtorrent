@@ -50,7 +50,7 @@ class ExchangeManager {
     assert(_torrentExchangeMap[connection.infoHash] != null);
     assert(_torrentExchangeMap[connection.infoHash]!.peerConnectionMap[connection.peer] == connection);
 
-    print('onPeerMessage: ${connection.peer} message: $message');
+    print('${connection.peer.ip.address} message: $message');
 
     if (message is IllegalMessage) {
       connection.closeByIllegal();

@@ -181,11 +181,11 @@ class HaveMessage implements PeerMessage {
   const HaveMessage._({required this.pieceIndex});
 
   factory HaveMessage.fromBuffer(List<int> buffer) {
-    return HaveMessage._(pieceIndex: buffer[5]);
+    return HaveMessage._(pieceIndex: ByteData.view(Uint8List.fromList(buffer).buffer, 5, 4).getInt32(0));
   }
 
   @override
-  Uint8List get toUint8List => Uint8List.fromList([0, 0, 0, 2, typeId, pieceIndex]);
+  Uint8List get toUint8List => Uint8List.fromList([0, 0, 0, 5, typeId, ...(ByteData(4)..setInt32(0, pieceIndex, Endian.big)).buffer.asUint8List()]);
 
   @override
   String toString() {
