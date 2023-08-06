@@ -9,53 +9,109 @@ import 'package:jtorrent/src/model/torrent.dart';
 import 'package:jtorrent/src/model/torrent_announce_info.dart';
 import 'package:jtorrent/src/announce/http_announce_handler.dart';
 import 'package:jtorrent/src/announce/announce_task.dart';
-import 'package:jtorrent/src/announce/announce_dispatcher.dart';
+
+import '../exception/tracker_exception.dart';
+import '../model/announce_request_options.dart';
+import '../model/torrent_download_info.dart';
+import 'announce_handler.dart';
 
 class AnnounceManager {
-  AnnounceManager({required int localPort, InternetAddress? localIp, required ExchangeManager exchangeManager})
-      : _announceDispatcher = AnnounceDispatcher(
-          localPort: localPort,
-          localIp: localIp,
-          exchangeManager: exchangeManager,
-          handlers: [const HttpAnnounceHandler()],
-        );
+  /// The port number that the client is listening on. Ports reserved for BitTorrent are typically 6881-6889
+  int localPort;
+
+  /// The parameter is only needed if the client is communicating to the tracker through a proxy (or a transparent web proxy/cache.)
+  InternetAddress? localIp;
+
+  /// Whether to return compact peer list, default is true
+  bool compact;
+
+  /// Whether to return peer id, default is true and in ignored if compact is true
+  bool noPeerId;
+
+  AnnounceManager({
+    required this.localPort,
+    this.localIp,
+    this.compact = true,
+    this.noPeerId = true,
+  }) : _announceHandlers = [const HttpAnnounceHandler()];
 
   final Map<Uint8List, AnnounceTask> _announceTaskMap = {};
 
-  final AnnounceDispatcher _announceDispatcher;
+  final List<AnnounceHandler> _announceHandlers;
 
-  set localPort(int value) {
-    _announceDispatcher.localPort = value;
-  }
+  Stream<TorrentAnnounceInfo> scheduleAnnounce({required Torrent torrent, TorrentDownloadInfoGetter? torrentDownloadInfoGetter}) {
+    if (_announceTaskMap[torrent.infoHash] == null) {
+      AnnounceTask task = AnnounceTask(
+        infoHash: torrent.infoHash,
+        trackers: _filterSupportTrackers(torrent.trackers),
+        totalSize: torrent.files.fold(0, (previousValue, element) => previousValue + element.length),
+        torrentDownloadInfoGetter: torrentDownloadInfoGetter,
+      );
+      _announceTaskMap[torrent.infoHash] = task;
 
-  set localIp(InternetAddress? value) {
-    _announceDispatcher.localIp = value;
-  }
+      for (Uri tracker in task.trackers) {
+        _announce(task, tracker);
 
-  set compact(bool value) {
-    _announceDispatcher.compact = value;
-  }
-
-  set noPeerId(bool value) {
-    _announceDispatcher.noPeerId = value;
-  }
-
-  AnnounceTask addAnnounceTask(Torrent torrent) {
-    if (_announceTaskMap.containsKey(torrent.infoHash)) {
-      return _announceTaskMap[torrent.infoHash]!;
+        task.announceTimers[tracker] = Timer(Duration(seconds: task.interval), () => _announce(task, tracker));
+      }
     }
 
-    AnnounceTask task = AnnounceTask(infoHash: torrent.infoHash, trackers: torrent.trackers);
-    _announceTaskMap[torrent.infoHash] = task;
-    return task;
+    return _transformStream(_announceTaskMap[torrent.infoHash]!.streamController.stream);
   }
 
-  Stream<TorrentAnnounceInfo> scheduleAnnounceTask(AnnounceTask task) {
+  void stopScheduleAnnounce({required Uint8List infoHash}) {
+    assert(_announceTaskMap[infoHash] != null);
+
+    AnnounceTask task = _announceTaskMap[infoHash]!;
+    for (Timer timer in task.announceTimers.values) {
+      timer.cancel();
+    }
+    task.streamController.close();
+
+    _announceTaskMap.remove(infoHash);
+  }
+
+  List<Uri> _filterSupportTrackers(List<List<Uri>> trackers) {
+    return trackers
+        .fold<List<Uri>>([], (previousValue, element) => previousValue..addAll(element))
+        .where((tracker) => _supportTracker(tracker))
+        .toList();
+  }
+
+  bool _supportTracker(Uri tracker) {
+    return _announceHandlers.any((handler) => handler.support(tracker));
+  }
+
+  void _announce(AnnounceTask task, Uri tracker) {
     assert(_announceTaskMap[task.infoHash] != null);
+    assert(_supportTracker(tracker));
 
-    Stream<AnnounceResponse> responseStream = _announceDispatcher.scheduleAnnounceTask(task);
+    for (AnnounceHandler handler in _announceHandlers) {
+      if (handler.support(tracker)) {
+        AnnounceRequestOptions requestOptions = _generateTrackerRequestOptions(task, TrackerRequestType.start);
+        Future<AnnounceResponse> responseFuture = handler.announce(task, requestOptions, tracker);
 
-    Stream<TorrentAnnounceInfo> result = responseStream.transform(StreamTransformer.fromHandlers(handleData: (response, sink) {
+        responseFuture.then((response) {
+          if (response.success) {
+            _updateTaskInterval(task, tracker, response.result!);
+            task.streamController.sink.add(response);
+          } else {
+            /// todo: This tracker server is not available for this torrent
+            print(response.failureReason);
+            task.trackers.remove(tracker);
+            task.announceTimers.remove(tracker)?.cancel();
+          }
+        }).onError((error, stackTrace) {
+          /// todo: Network error, retry
+        });
+
+        break;
+      }
+    }
+  }
+
+  Stream<TorrentAnnounceInfo> _transformStream(Stream<AnnounceResponse> stream) {
+    return stream.transform(StreamTransformer.fromHandlers(handleData: (response, sink) {
       assert(response.success && response.result != null);
 
       sink.add(TorrentAnnounceInfo(
@@ -65,14 +121,31 @@ class AnnounceManager {
         peers: UnmodifiableSetView(response.result!.peers),
       ));
     }));
-
-    return result;
   }
 
-  void stopScheduleAnnounceTask(AnnounceTask task) {
-    assert(_announceTaskMap[task.infoHash] != null);
+  void _updateTaskInterval(AnnounceTask task, Uri tracker, AnnounceSuccessResponse response) {
+    int newInterval = response.minInterval ?? response.interval;
+    if (task.interval == newInterval) {
+      return;
+    }
 
-    _announceDispatcher.stopScheduleAnnounceTask(task);
-    _announceTaskMap.remove(task.infoHash);
+    task.interval = newInterval;
+    task.announceTimers.remove(tracker)?.cancel();
+    task.announceTimers[tracker] = Timer(Duration(seconds: newInterval), () => _announce(task, tracker));
+  }
+
+  AnnounceRequestOptions _generateTrackerRequestOptions(AnnounceTask task, TrackerRequestType type) {
+    TorrentTaskDownloadInfo? currentDownloadInfo = task.torrentDownloadInfoGetter?.call(task.infoHash);
+
+    return AnnounceRequestOptions(
+      type: type,
+      localIp: localIp,
+      localPort: localPort,
+      compact: compact,
+      noPeerId: noPeerId,
+      uploaded: currentDownloadInfo?.uploaded ?? 0,
+      downloaded: currentDownloadInfo?.downloaded ?? 0,
+      left: currentDownloadInfo?.left ?? task.totalSize,
+    );
   }
 }
