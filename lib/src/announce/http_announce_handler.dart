@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -135,15 +136,17 @@ class HttpAnnounceHandler extends AnnounceHandler {
 
   String _generateQueryParameters(AnnounceTask task, AnnounceRequestOptions requestOptions) {
     Map<String, dynamic> queryParametersMap = {
-      'info_hash': task.generateInfoHashString(),
-      'peer_id': CommonUtil.generateLocalPeerId(task.infoHash),
+      'info_hash': Uri.encodeQueryComponent(String.fromCharCodes(task.infoHash), encoding: latin1),
+      'peer_id': Uri.encodeQueryComponent(String.fromCharCodes(CommonUtil.generateLocalPeerId(task.infoHash)), encoding: latin1),
       'port': requestOptions.localPort,
       if (requestOptions.localIp != null) 'localip': requestOptions.localIp!.address,
-      if (requestOptions.uploaded != null) 'uploaded': requestOptions.uploaded,
-      if (requestOptions.downloaded != null) 'downloaded': requestOptions.downloaded,
-      if (requestOptions.left != null) 'left': requestOptions.left,
+      'uploaded': requestOptions.uploaded,
+      'downloaded': requestOptions.downloaded,
+      'left': requestOptions.left,
       'compact': requestOptions.compact ? 1 : 0,
       'no_peer_id': requestOptions.noPeerId ? 1 : 0,
+      'numwant': requestOptions.numWant,
+      'event': requestOptions.type.name,
     };
 
     return queryParametersMap.entries.map((entry) => '${entry.key}=${entry.value}').join('&');

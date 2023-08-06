@@ -16,14 +16,17 @@ class AnnounceRequestOptions {
   /// Inherited from [TrackerManager.noPeerId]
   final bool noPeerId;
 
+  /// Inherited from [TrackerManager.numWant]
+  int numWant;
+
   /// Bytes uploaded
-  final int? uploaded;
+  int uploaded;
 
   /// Bytes downloaded
-  final int? downloaded;
+  int downloaded;
 
   /// Bytes left
-  final int? left;
+  int left;
 
   AnnounceRequestOptions({
     required this.type,
@@ -31,10 +34,11 @@ class AnnounceRequestOptions {
     required this.localPort,
     required this.compact,
     required this.noPeerId,
-    this.uploaded,
-    this.downloaded,
-    this.left,
+    required this.numWant,
+    required this.uploaded,
+    required this.downloaded,
+    required this.left,
   });
 }
 
-enum TrackerRequestType { start, complete, stopped }
+enum TrackerRequestType { started, completed, stopped }

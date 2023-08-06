@@ -28,11 +28,15 @@ class AnnounceManager {
   /// Whether to return peer id, default is true and in ignored if compact is true
   bool noPeerId;
 
+  /// Number of peers that the client would like to receive from the tracker, default is 200
+  int numWant;
+
   AnnounceManager({
     required this.localPort,
     this.localIp,
     this.compact = true,
     this.noPeerId = true,
+    this.numWant = 100,
   }) : _announceHandlers = [const HttpAnnounceHandler()];
 
   final Map<Uint8List, AnnounceTask> _announceTaskMap = {};
@@ -44,7 +48,7 @@ class AnnounceManager {
       AnnounceTask task = AnnounceTask(
         infoHash: torrent.infoHash,
         trackers: _filterSupportTrackers(torrent.trackers),
-        totalSize: torrent.files.fold(0, (previousValue, element) => previousValue + element.length),
+        totalFileSize: torrent.files.fold(0, (previousValue, element) => previousValue + element.length),
         torrentDownloadInfoGetter: torrentDownloadInfoGetter,
       );
       _announceTaskMap[torrent.infoHash] = task;
@@ -88,7 +92,7 @@ class AnnounceManager {
 
     for (AnnounceHandler handler in _announceHandlers) {
       if (handler.support(tracker)) {
-        AnnounceRequestOptions requestOptions = _generateTrackerRequestOptions(task, TrackerRequestType.start);
+        AnnounceRequestOptions requestOptions = _generateTrackerRequestOptions(task, TrackerRequestType.started);
         Future<AnnounceResponse> responseFuture = handler.announce(task, requestOptions, tracker);
 
         responseFuture.then((response) {
@@ -112,7 +116,8 @@ class AnnounceManager {
 
   Stream<TorrentAnnounceInfo> _transformStream(Stream<AnnounceResponse> stream) {
     return stream.transform(StreamTransformer.fromHandlers(handleData: (response, sink) {
-      assert(response.success && response.result != null);
+      assert(response.success);
+      assert(response.result != null);
 
       sink.add(TorrentAnnounceInfo(
         tracker: response.tracker,
@@ -143,9 +148,10 @@ class AnnounceManager {
       localPort: localPort,
       compact: compact,
       noPeerId: noPeerId,
+      numWant: numWant,
       uploaded: currentDownloadInfo?.uploaded ?? 0,
       downloaded: currentDownloadInfo?.downloaded ?? 0,
-      left: currentDownloadInfo?.left ?? task.totalSize,
+      left: currentDownloadInfo?.left ?? task.totalFileSize,
     );
   }
 }

@@ -3,8 +3,8 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:jtorrent/src/exception/torrent_parse_exception.dart';
+import 'package:jtorrent/src/extension/uint8_list_extension.dart';
 import 'package:jtorrent/src/extension/utf8_extension.dart';
-import 'package:jtorrent/src/model/torrent_file.dart';
 import 'package:jtorrent_bencoding/jtorrent_bencoding.dart';
 import 'package:path/path.dart';
 
@@ -18,8 +18,6 @@ class Torrent {
 
   /// The "info hash" of the torrent, 20-bytes
   final Uint8List infoHash;
-
-  String get infoHashInHex => infoHash.map((char) => char.toRadixString(16)).map((char) => char.length == 2 ? char : '0$char').toList().join();
 
   /// The creation time of the torrent, in standard UNIX epoch format
   final DateTime? createTime;
@@ -253,6 +251,22 @@ class Torrent {
 
   @override
   String toString() {
-    return 'Torrent{announces: $trackers, pieceLength: $pieceLength, infoHash: $infoHashInHex, createTime: $createTime, comment: $comment, createdBy: $createdBy, files: $files, pieceSha1s: $pieceSha1sInHex}';
+    return 'Torrent{announces: $trackers, pieceLength: $pieceLength, infoHash: ${infoHash.toHexString}, createTime: $createTime, comment: $comment, createdBy: $createdBy, files: $files, pieceSha1s: $pieceSha1sInHex}';
+  }
+}
+
+/// File content described in torrent file
+class TorrentFile {
+  /// File relative path, the last of which is the actual file name
+  final String path;
+
+  /// The length of the file in bytes
+  final int length;
+
+  const TorrentFile({required this.path, required this.length});
+
+  @override
+  String toString() {
+    return 'TorrentFile{path: $path, length: $length}';
   }
 }

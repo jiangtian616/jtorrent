@@ -1,12 +1,12 @@
 import 'dart:io';
 
 class Peer {
-  /// A string of length 20, correspond to peer_id in request. Null in compact mode
+  /// A string of length 20 in bytes, correspond to peer_id in request. Null in compact mode
   final String? peerId;
-  
+
   /// Peer IP address
   final InternetAddress ip;
-  
+
   /// Peer port
   final int port;
 
