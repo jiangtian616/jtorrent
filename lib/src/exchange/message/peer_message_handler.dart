@@ -1,183 +1,148 @@
-import 'dart:async';
-import 'dart:typed_data';
-
-import 'package:jtorrent/src/exchange/exchange_manager.dart';
 import 'package:jtorrent/src/exchange/message/peer_meesage.dart';
+import 'package:jtorrent/src/util/log_util.dart';
 
-import '../../model/peer.dart';
+import '../../model/torrent_exchange_info.dart';
 import '../connection/peer_connection.dart';
 
 abstract interface class PeerMessageHandler {
-  Uint8List get infoHash;
+  bool support(PeerMessage peerMessage);
 
-  void handleNewResponseData(Uint8List response);
-
-  StreamSubscription<PeerMessage> listen(void Function(PeerMessage data) onPeerMessage);
-
-  void reset();
+  void handle(PeerConnection connection, PeerMessage peerMessage);
 }
 
-class TcpPeerMessageHandler implements PeerMessageHandler {
-  /// Inherit from [PeerConnection]
-  final Uint8List _infoHash;
-
-  TcpPeerMessageHandler({required Uint8List infoHash}) : _infoHash = infoHash;
-
-  /// The buffer for the message from socket
-  final List<int> _buffer = [];
-
-  /// Add message to this to notify [ExchangeManager]
-  final StreamController<PeerMessage> _peerMessageStreamController = StreamController();
-
-  final List<StreamSubscription<PeerMessage>> _subscriptions = [];
+class IllegalPeerMessageHandler implements PeerMessageHandler {
+  const IllegalPeerMessageHandler();
 
   @override
-  Uint8List get infoHash => _infoHash;
-
-  @override
-  void handleNewResponseData(Uint8List response) {
-    _buffer.addAll(response);
-    if (_buffer.isEmpty) {
-      return;
-    }
-
-    _handleBuffer();
+  bool support(PeerMessage peerMessage) {
+    return peerMessage is IllegalMessage;
   }
 
   @override
-  StreamSubscription<PeerMessage> listen(void Function(PeerMessage data) onPeerMessage) {
-    StreamSubscription<PeerMessage> subscription = _peerMessageStreamController.stream.listen(onPeerMessage);
-    _subscriptions.add(subscription);
-    return subscription;
+  void handle(PeerConnection connection, PeerMessage peerMessage) {
+    assert(support(peerMessage));
+
+    connection.closeByIllegal();
+  }
+}
+
+class HandshakePeerMessageHandler implements PeerMessageHandler {
+  const HandshakePeerMessageHandler();
+
+  @override
+  bool support(PeerMessage peerMessage) {
+    return peerMessage is HandshakeMessage;
   }
 
   @override
-  void reset() {
-    _buffer.clear();
+  void handle(PeerConnection connection, PeerMessage peerMessage) {
+    assert(support(peerMessage));
 
-    for (StreamSubscription<PeerMessage> value in _subscriptions) {
-      value.cancel();
+    if (connection.handshaked) {
+      Log.info('${connection.peer.ip.address} handshake again');
     }
+    connection.handshaked = true;
+  }
+}
+
+class KeepAlivePeerMessageHandler implements PeerMessageHandler {
+  const KeepAlivePeerMessageHandler();
+
+  @override
+  bool support(PeerMessage peerMessage) {
+    return peerMessage is KeepAliveMessage;
   }
 
-  void _handleBuffer() {
-    if (_isHandshakeMessageHead()) {
-      _handleHandshakeMessage();
+  @override
+  void handle(PeerConnection connection, PeerMessage peerMessage) {
+    assert(support(peerMessage));
 
-      if (_buffer.isNotEmpty) {
-        _handleBuffer();
+    connection.lastActiveTime = DateTime.now();
+  }
+}
+
+class ChokePeerMessageHandler implements PeerMessageHandler {
+  const ChokePeerMessageHandler();
+
+  @override
+  bool support(PeerMessage peerMessage) {
+    return peerMessage is ChokeMessage;
+  }
+
+  @override
+  void handle(PeerConnection connection, PeerMessage peerMessage) {
+    assert(support(peerMessage));
+
+    connection.peerChoking = true;
+  }
+}
+
+class UnChokePeerMessageHandler implements PeerMessageHandler {
+  const UnChokePeerMessageHandler();
+
+  @override
+  bool support(PeerMessage peerMessage) {
+    return peerMessage is UnChokeMessage;
+  }
+
+  @override
+  void handle(PeerConnection connection, PeerMessage peerMessage) {
+    assert(support(peerMessage));
+
+    connection.peerChoking = false;
+  }
+}
+
+class InterestedPeerMessageHandler implements PeerMessageHandler {
+  const InterestedPeerMessageHandler();
+
+  @override
+  bool support(PeerMessage peerMessage) {
+    return peerMessage is InterestedMessage;
+  }
+
+  @override
+  void handle(PeerConnection connection, PeerMessage peerMessage) {
+    assert(support(peerMessage));
+
+    connection.peerInterested = true;
+  }
+}
+
+class NotInterestedPeerMessageHandler implements PeerMessageHandler {
+  const NotInterestedPeerMessageHandler();
+
+  @override
+  bool support(PeerMessage peerMessage) {
+    return peerMessage is NotInterestedMessage;
+  }
+
+  @override
+  void handle(PeerConnection connection, PeerMessage peerMessage) {
+    assert(support(peerMessage));
+
+    connection.peerInterested = false;
+  }
+}
+
+class StackHaveMessageHandler implements PeerMessageHandler {
+  const StackHaveMessageHandler();
+
+  @override
+  bool support(PeerMessage peerMessage) {
+    return peerMessage is StackHaveMessage;
+  }
+
+  @override
+  void handle(PeerConnection connection, PeerMessage peerMessage) {
+    assert(support(peerMessage));
+
+    for (int pieceIndex in (peerMessage as StackHaveMessage).pieceIndexes) {
+      if (pieceIndex >= connection.pieces.length) {
+        Log.severe('StackHaveMessage pieceIndex $pieceIndex >= pieces.length ${connection.pieces.length}');
+        continue;
       }
-      return;
+      connection.pieces[pieceIndex] = PieceStatus.downloaded;
     }
-
-    if (_isOtherMessageHead()) {
-      _handleOtherMessage();
-
-      if (_buffer.isNotEmpty) {
-        _handleBuffer();
-      }
-      return;
-    }
-  }
-
-  bool _isHandshakeMessageHead() {
-    if (_buffer.length < 68) {
-      return false;
-    }
-
-    final int pStrlen = _buffer[0];
-    if (pStrlen != HandshakeMessage.defaultPStrlen) {
-      return false;
-    }
-
-    for (int i = 0; i < HandshakeMessage.defaultPStrlen; i++) {
-      if (_buffer[i + 1] != HandshakeMessage.defaultPStrCodeUnits[i]) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  void _handleHandshakeMessage() {
-    if (_isInvalidHandshakeMessage()) {
-      return _peerMessageStreamController.sink.add(IllegalMessage(message: 'Invalid handshake message'));
-    }
-
-    List<int> segment = _buffer.sublist(0, 68);
-    _buffer.removeRange(0, 68);
-    _peerMessageStreamController.sink.add(HandshakeMessage.fromBuffer(segment));
-  }
-
-  bool _isInvalidHandshakeMessage() {
-    for (int i = 0; i < 20; i++) {
-      if (_buffer[i + 28] != infoHash[i]) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  bool _isOtherMessageHead() {
-    if (_buffer.length < 4) {
-      return false;
-    }
-
-    if (_buffer.length == 4 && (_buffer[0] == 0 && _buffer[1] == 0 && _buffer[2] == 0 && _buffer[3] == 0)) {
-      return false;
-    }
-
-    for (int i = 0; i < 4; i++) {
-      if (_buffer[i] >= 1 << 8) {
-        return false;
-      }
-    }
-
-    int length = ByteData.view(Uint8List.fromList(_buffer).buffer, 0, 4).getInt32(0, Endian.big);
-    if (_buffer.length < 4 + length) {
-      return false;
-    }
-
-    return true;
-  }
-
-  void _handleOtherMessage() {
-    int length = ByteData.view(Uint8List.fromList(_buffer).buffer, 0, 4).getInt32(0, Endian.big);
-
-    List<int> segment = _buffer.sublist(0, 4 + length);
-    _buffer.removeRange(0, 4 + length);
-
-    if (length == 0) {
-      return _peerMessageStreamController.sink.add(KeepAliveMessage.instance);
-    }
-
-    int typeId = segment[4];
-
-    PeerMessage peerMessage;
-    switch (typeId) {
-      case ChokeMessage.typeId:
-        peerMessage = ChokeMessage.instance;
-      case UnChokeMessage.typeId:
-        peerMessage = UnChokeMessage.instance;
-      case InterestedMessage.typeId:
-        peerMessage = InterestedMessage.instance;
-      case NotInterestedMessage.typeId:
-        peerMessage = NotInterestedMessage.instance;
-      case HaveMessage.typeId:
-        peerMessage = HaveMessage.fromBuffer(segment);
-      case BitFieldMessage.typeId:
-        peerMessage = BitFieldMessage.fromBuffer(segment);
-      case RequestMessage.typeId:
-        peerMessage = RequestMessage.fromBuffer(segment);
-      case PieceMessage.typeId:
-        peerMessage = PieceMessage.fromBuffer(segment);
-      case CancelMessage.typeId:
-        peerMessage = CancelMessage.fromBuffer(segment);
-      default:
-        peerMessage = IllegalMessage(message: 'Unknown message type id: $typeId');
-    }
-
-    _peerMessageStreamController.sink.add(peerMessage);
   }
 }

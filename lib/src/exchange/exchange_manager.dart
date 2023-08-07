@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:jtorrent/src/exchange/message/peer_message_handler.dart';
 import 'package:jtorrent/src/model/torrent.dart';
 import 'package:jtorrent/src/util/log_util.dart';
 
@@ -11,6 +12,8 @@ import 'message/peer_meesage.dart';
 
 class ExchangeManager {
   final Map<Uint8List, TorrentExchangeInfo> _torrentExchangeMap = {};
+
+  final List<PeerMessageHandler> _messageHandlers = const [IllegalPeerMessageHandler()];
 
   void addNewTorrentTask(Torrent torrent, Set<Peer> peers) {
     TorrentExchangeInfo? exchangeStatusInfo = _torrentExchangeMap[torrent.infoHash];
@@ -46,9 +49,9 @@ class ExchangeManager {
     return connection;
   }
 
-  PeerConnection _generatePeerConnection(TorrentExchangeInfo exchangeStatusInfo, Peer peer) {
+  PeerConnection _generatePeerConnection(TorrentExchangeInfo torrentExchangeInfo, Peer peer) {
     /// todo
-    return TcpPeerConnection(infoHash: exchangeStatusInfo.torrent.infoHash, peer: peer);
+    return TcpPeerConnection(peer: peer, torrentExchangeInfo: torrentExchangeInfo);
   }
 
   void _onPeerMessage(PeerConnection connection, PeerMessage message) {
@@ -57,8 +60,10 @@ class ExchangeManager {
 
     Log.fine('${connection.peer.ip.address} message: $message');
 
-    if (message is IllegalMessage) {
-      connection.closeByIllegal();
+    for (PeerMessageHandler value in _messageHandlers) {
+      if (value.support(message)) {
+        value.handle(connection, message);
+      }
     }
   }
 }

@@ -5,32 +5,41 @@ import 'dart:typed_data';
 import 'package:jtorrent/src/exchange/message/peer_meesage.dart';
 
 import '../../model/peer.dart';
-import '../message/peer_message_handler.dart';
+import '../../model/torrent_exchange_info.dart';
+import '../message/peer_message_raw_handler.dart';
 
 abstract class PeerConnection {
-  final Uint8List infoHash;
   final Peer peer;
+  final TorrentExchangeInfo torrentExchangeInfo;
 
   bool connecting;
   bool connected;
   bool illegal;
+  bool handshaked;
+  DateTime? lastActiveTime;
 
   bool amChoking;
   bool amInterested;
   bool peerChoking;
   bool peerInterested;
 
+  final List<PieceStatus> pieces;
+
   PeerConnection({
-    required this.infoHash,
     required this.peer,
+    required this.torrentExchangeInfo,
     this.connecting = false,
     this.connected = false,
     this.illegal = false,
+    this.handshaked = false,
+    this.lastActiveTime,
     this.amChoking = true,
     this.amInterested = false,
     this.peerChoking = true,
     this.peerInterested = false,
-  });
+  }) : pieces = List.filled(torrentExchangeInfo.torrent.pieceSha1s.length, PieceStatus.notDownloaded);
+
+  Uint8List get infoHash => torrentExchangeInfo.torrent.infoHash;
 
   Future<void> connect() {
     assert(!connecting && !connected);
@@ -58,19 +67,19 @@ abstract class PeerConnection {
 
 class TcpPeerConnection extends PeerConnection {
   TcpPeerConnection({
-    required super.infoHash,
     required super.peer,
+    required super.torrentExchangeInfo,
     super.amChoking = true,
     super.amInterested = false,
     super.peerChoking = true,
     super.peerInterested = false,
   }) {
-    _messageHandler = TcpPeerMessageHandler(infoHash: infoHash);
+    _messageHandler = TcpPeerMessageRawHandler(infoHash: infoHash);
   }
 
   Socket? _socket;
 
-  late final TcpPeerMessageHandler _messageHandler;
+  late final TcpPeerMessageRawHandler _messageHandler;
 
   @override
   Future<void> doConnect() async {

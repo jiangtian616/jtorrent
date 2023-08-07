@@ -2,10 +2,13 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:jtorrent/src/extension/uint8_list_extension.dart';
+import 'package:jtorrent/src/model/peer.dart';
 
 import '../../util/common_util.dart';
 
 abstract interface class PeerMessage {
+  Peer get peer;
+
   Uint8List get toUint8List;
 }
 
@@ -190,6 +193,25 @@ class HaveMessage implements PeerMessage {
   @override
   String toString() {
     return 'HaveMessage{pieceIndex: $pieceIndex}';
+  }
+}
+
+/// Peer may send multiple Have messages at once, we stack them together
+class StackHaveMessage extends HaveMessage {
+  final List<int> pieceIndexes;
+
+  const StackHaveMessage._({required this.pieceIndexes}) : super._(pieceIndex: 0);
+
+  factory StackHaveMessage.fromHaveMessage(List<HaveMessage> haveMessages) {
+    return StackHaveMessage._(pieceIndexes: haveMessages.map((m) => m.pieceIndex).toList());
+  }
+
+  @override
+  Uint8List get toUint8List => throw UnsupportedError('StackHaveMessage cannot be converted to Uint8List');
+
+  @override
+  String toString() {
+    return 'StackHaveMessage{pieceIndexes: $pieceIndexes}';
   }
 }
 
