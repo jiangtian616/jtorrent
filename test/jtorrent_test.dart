@@ -7,9 +7,12 @@ import 'package:jtorrent/src/exchange/exchange_manager.dart';
 import 'package:jtorrent/src/model/torrent.dart';
 import 'package:jtorrent/src/model/torrent_announce_info.dart';
 import 'package:jtorrent/src/model/torrent_download_info.dart';
+import 'package:logging/logging.dart';
 import 'package:test/test.dart';
 
 void main() {
+  setUpAll(() => hierarchicalLoggingEnabled = true);
+
   group('Announce', () {
     test('Test parse torrent', () async {
       Torrent torrent = Torrent.fromFileSync(File('/Users/jtmonster/IdeaProjects/jtorrent/test/torrent/sample.torrent'));
@@ -37,7 +40,7 @@ void main() {
 
   group('Exchange', () {
     test('Test handshake message', () async {
-      Torrent torrent = Torrent.fromFileSync(File('/Users/jtmonster/IdeaProjects/jtorrent/test/torrent/1.torrent'));
+      Torrent torrent = Torrent.fromFileSync(File('/Users/jtmonster/IdeaProjects/jtorrent/test/torrent/manga.torrent'));
 
       ExchangeManager exchangeManager = ExchangeManager();
       AnnounceManager trackerManager = AnnounceManager(localPort: 6881, compact: true, noPeerId: true);

@@ -72,7 +72,7 @@ class HandshakeMessage implements PeerMessage {
 
   @override
   String toString() {
-    return 'HandshakeMessage{pStrlen: $pStrlen, pStr: $pStr, reserved: $reserved, infoHash: ${infoHash.toHexString()}, peerId: ${String.fromCharCodes(peerId)}';
+    return 'HandshakeMessage{pStrlen: $pStrlen, pStr: $pStr, reserved: $reserved, infoHash: ${infoHash.toHexString}, peerId: ${String.fromCharCodes(peerId)}';
   }
 }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:jtorrent/src/model/torrent.dart';
+import 'package:jtorrent/src/util/log_util.dart';
 
 import '../model/torrent_exchange_info.dart';
 import '../model/peer.dart';
@@ -12,15 +13,19 @@ class ExchangeManager {
   final Map<Uint8List, TorrentExchangeInfo> _torrentExchangeMap = {};
 
   void addNewTorrentTask(Torrent torrent, Set<Peer> peers) {
-    assert(_torrentExchangeMap[torrent.infoHash] == null);
+    TorrentExchangeInfo? exchangeStatusInfo = _torrentExchangeMap[torrent.infoHash];
 
-    TorrentExchangeInfo exchangeStatusInfo = TorrentExchangeInfo(torrent: torrent, peers: peers);
-    _torrentExchangeMap[torrent.infoHash] = exchangeStatusInfo;
+    if (exchangeStatusInfo == null) {
+      exchangeStatusInfo = TorrentExchangeInfo(torrent: torrent, peers: peers);
+      _torrentExchangeMap[torrent.infoHash] = exchangeStatusInfo;
+    } else {
+      exchangeStatusInfo.allKnownPeers.addAll(peers);
+    }
 
     for (Peer peer in exchangeStatusInfo.allKnownPeers) {
       Future<PeerConnection> connectionFuture = _openConnection(exchangeStatusInfo, peer);
       Future<void> handshakeFuture = connectionFuture.then((connection) => connection.sendHandShake());
-      handshakeFuture.onError((error, stackTrace) => print('Connection error: $peer'));
+      handshakeFuture.onError((error, stackTrace) => Log.warning('Connection error: $peer'));
     }
   }
 
@@ -50,7 +55,7 @@ class ExchangeManager {
     assert(_torrentExchangeMap[connection.infoHash] != null);
     assert(_torrentExchangeMap[connection.infoHash]!.peerConnectionMap[connection.peer] == connection);
 
-    print('${connection.peer.ip.address} message: $message');
+    Log.fine('${connection.peer.ip.address} message: $message');
 
     if (message is IllegalMessage) {
       connection.closeByIllegal();

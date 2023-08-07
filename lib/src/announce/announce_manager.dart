@@ -3,14 +3,14 @@ import 'dart:collection';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:jtorrent/src/exchange/exchange_manager.dart';
+import 'package:jtorrent/src/extension/uint8_list_extension.dart';
 import 'package:jtorrent/src/model/announce_response.dart';
 import 'package:jtorrent/src/model/torrent.dart';
 import 'package:jtorrent/src/model/torrent_announce_info.dart';
 import 'package:jtorrent/src/announce/http_announce_handler.dart';
 import 'package:jtorrent/src/announce/announce_task.dart';
+import 'package:jtorrent/src/util/log_util.dart';
 
-import '../exception/tracker_exception.dart';
 import '../model/announce_request_options.dart';
 import '../model/torrent_download_info.dart';
 import 'announce_handler.dart';
@@ -92,6 +92,8 @@ class AnnounceManager {
 
     for (AnnounceHandler handler in _announceHandlers) {
       if (handler.support(tracker)) {
+        Log.fine('Announce to ${tracker.toString()} with ${task.infoHash.toHexString}');
+        
         AnnounceRequestOptions requestOptions = _generateTrackerRequestOptions(task, TrackerRequestType.started);
         Future<AnnounceResponse> responseFuture = handler.announce(task, requestOptions, tracker);
 
@@ -101,11 +103,12 @@ class AnnounceManager {
             task.streamController.sink.add(response);
           } else {
             /// todo: This tracker server is not available for this torrent
-            print(response.failureReason);
+            Log.info('Announce to ${tracker.toString()} with ${task.infoHash.toHexString} failed, reason: ${response.failureReason}');
             task.trackers.remove(tracker);
             task.announceTimers.remove(tracker)?.cancel();
           }
         }).onError((error, stackTrace) {
+          Log.warning('Announce to ${tracker.toString()} with ${task.infoHash.toHexString} error, reason: ${error.toString()}');
           /// todo: Network error, retry
         });
 
