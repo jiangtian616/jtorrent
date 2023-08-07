@@ -22,7 +22,7 @@ void main() {
     });
 
     test('Test announce manager', () async {
-      Torrent torrent = Torrent.fromFileSync(File('/Users/jtmonster/IdeaProjects/jtorrent/test/torrent/1.torrent'));
+      Torrent torrent = Torrent.fromFileSync(File('/Users/jtmonster/IdeaProjects/jtorrent/test/torrent/manga.torrent'));
 
       AnnounceManager trackerManager = AnnounceManager(localPort: 6881, compact: true, noPeerId: true);
 
@@ -42,7 +42,7 @@ void main() {
     test('Test handshake message', () async {
       Torrent torrent = Torrent.fromFileSync(File('/Users/jtmonster/IdeaProjects/jtorrent/test/torrent/manga.torrent'));
 
-      ExchangeManager exchangeManager = ExchangeManager();
+      ExchangeManager exchangeManager = ExchangeManager(downloadPath: '/Users/JTMonster/IdeaProjects/jtorrent/test');
       AnnounceManager trackerManager = AnnounceManager(localPort: 6881, compact: true, noPeerId: true);
 
       Stream<TorrentAnnounceInfo> stream = trackerManager.scheduleAnnounce(
@@ -56,5 +56,5 @@ void main() {
 
       await subscription.asFuture();
     });
-  });
+  }, timeout: Timeout(Duration(seconds: 1000)));
 }

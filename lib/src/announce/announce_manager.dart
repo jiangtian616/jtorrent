@@ -93,12 +93,15 @@ class AnnounceManager {
     for (AnnounceHandler handler in _announceHandlers) {
       if (handler.support(tracker)) {
         Log.fine('Announce to ${tracker.toString()} with ${task.infoHash.toHexString}');
-        
+
         AnnounceRequestOptions requestOptions = _generateTrackerRequestOptions(task, TrackerRequestType.started);
         Future<AnnounceResponse> responseFuture = handler.announce(task, requestOptions, tracker);
 
         responseFuture.then((response) {
           if (response.success) {
+            Log.fine(
+                'Announce to ${tracker.toString()} with ${task.infoHash.toHexString} success, result peer size : ${response.result!.peers.length}');
+
             _updateTaskInterval(task, tracker, response.result!);
             task.streamController.sink.add(response);
           } else {
@@ -109,6 +112,7 @@ class AnnounceManager {
           }
         }).onError((error, stackTrace) {
           Log.warning('Announce to ${tracker.toString()} with ${task.infoHash.toHexString} error, reason: ${error.toString()}');
+
           /// todo: Network error, retry
         });
 

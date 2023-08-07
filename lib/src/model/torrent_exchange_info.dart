@@ -10,6 +10,8 @@ class TorrentExchangeInfo {
 
   final List<PieceStatus> pieces;
 
+  bool get allPiecesDownloaded => pieces.every((PieceStatus status) => status == PieceStatus.downloaded);
+  
   final Map<Peer, PeerConnection> peerConnectionMap = {};
 
   TorrentExchangeInfo({required this.torrent, required Set<Peer> peers})

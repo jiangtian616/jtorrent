@@ -8,6 +8,8 @@ import '../../model/peer.dart';
 import '../connection/peer_connection.dart';
 
 abstract interface class PeerMessageRawHandler {
+  Peer get peer;
+
   Uint8List get infoHash;
 
   void handleNewResponseData(Uint8List response);
@@ -15,13 +17,20 @@ abstract interface class PeerMessageRawHandler {
   StreamSubscription<PeerMessage> listen(void Function(PeerMessage data) onPeerMessage);
 
   void reset();
+
+  void close();
 }
 
 class TcpPeerMessageRawHandler implements PeerMessageRawHandler {
   /// Inherit from [PeerConnection]
   final Uint8List _infoHash;
 
-  TcpPeerMessageRawHandler({required Uint8List infoHash}) : _infoHash = infoHash;
+  /// Inherit from [PeerConnection]
+  final Peer _peer;
+
+  TcpPeerMessageRawHandler({required Uint8List infoHash, required Peer peer})
+      : _infoHash = infoHash,
+        _peer = peer;
 
   /// The buffer for the message from socket
   final List<int> _buffer = [];
@@ -38,7 +47,10 @@ class TcpPeerMessageRawHandler implements PeerMessageRawHandler {
   Uint8List get infoHash => _infoHash;
 
   @override
-  void handleNewResponseData(Peer peer, Uint8List response) {
+  Peer get peer => _peer;
+
+  @override
+  void handleNewResponseData(Uint8List response) {
     _buffer.addAll(response);
     if (_buffer.isEmpty) {
       return;
@@ -61,6 +73,13 @@ class TcpPeerMessageRawHandler implements PeerMessageRawHandler {
     for (StreamSubscription<PeerMessage> value in _subscriptions) {
       value.cancel();
     }
+    _subscriptions.clear();
+  }
+
+  @override
+  void close() {
+    reset();
+    _peerMessageStreamController.close();
   }
 
   void _handleBuffer() {
@@ -134,7 +153,7 @@ class TcpPeerMessageRawHandler implements PeerMessageRawHandler {
     }
 
     for (int i = 0; i < 4; i++) {
-      if (_buffer[i] >= 1 << 8) {
+      if (_buffer[i] >= (2 << 8 - 1)) {
         return false;
       }
     }

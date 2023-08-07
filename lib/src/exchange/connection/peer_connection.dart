@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:jtorrent/src/exchange/message/peer_meesage.dart';
+import 'package:jtorrent/src/util/log_util.dart';
 
 import '../../model/peer.dart';
 import '../../model/torrent_exchange_info.dart';
@@ -23,7 +24,7 @@ abstract class PeerConnection {
   bool peerChoking;
   bool peerInterested;
 
-  final List<PieceStatus> pieces;
+  final List<PieceStatus> peerPieces;
 
   PeerConnection({
     required this.peer,
@@ -37,7 +38,7 @@ abstract class PeerConnection {
     this.amInterested = false,
     this.peerChoking = true,
     this.peerInterested = false,
-  }) : pieces = List.filled(torrentExchangeInfo.torrent.pieceSha1s.length, PieceStatus.notDownloaded);
+  }) : peerPieces = List.filled(torrentExchangeInfo.torrent.pieceSha1s.length, PieceStatus.notDownloaded);
 
   Uint8List get infoHash => torrentExchangeInfo.torrent.infoHash;
 
@@ -51,7 +52,13 @@ abstract class PeerConnection {
 
   StreamSubscription<PeerMessage> listen(void Function(PeerMessage data) onPeerMessage);
 
-  Future sendHandShake();
+  void sendHandShake();
+
+  void sendUnChoke();
+
+  void sendRequest(int pieceIndex);
+
+  void sendInterested();
 
   void closeByIllegal() {
     assert(connecting && connected);
@@ -69,12 +76,12 @@ class TcpPeerConnection extends PeerConnection {
   TcpPeerConnection({
     required super.peer,
     required super.torrentExchangeInfo,
-    super.amChoking = true,
-    super.amInterested = false,
-    super.peerChoking = true,
-    super.peerInterested = false,
+    super.amChoking,
+    super.amInterested,
+    super.peerChoking,
+    super.peerInterested,
   }) {
-    _messageHandler = TcpPeerMessageRawHandler(infoHash: infoHash);
+    _messageHandler = TcpPeerMessageRawHandler(infoHash: infoHash, peer: peer);
   }
 
   Socket? _socket;
@@ -110,12 +117,42 @@ class TcpPeerConnection extends PeerConnection {
   }
 
   @override
-  Future sendHandShake() {
+  void sendHandShake() {
     assert(connected);
     assert(_socket != null);
 
+    Log.fine('send handshake to ${peer.ip.address}:${peer.port}');
     _socket!.add(HandshakeMessage.noExtension(infoHash: infoHash).toUint8List);
-    return _socket!.flush();
+  }
+
+  @override
+  void sendUnChoke() {
+    assert(connected);
+    assert(_socket != null);
+    assert(amChoking == true);
+
+    Log.fine('send unChoke to ${peer.ip.address}:${peer.port}');
+    _socket!.add(UnChokeMessage.instance.toUint8List);
+  }
+
+  @override
+  void sendRequest(int pieceIndex) {
+    assert(connected);
+    assert(_socket != null);
+    assert(peerChoking == false);
+
+    Log.fine('send request to ${peer.ip.address}:${peer.port} for piece $pieceIndex, length ${torrentExchangeInfo.torrent.pieceLength}');
+    _socket!.add(RequestMessage(index: pieceIndex, begin: 0, length: torrentExchangeInfo.torrent.pieceLength).toUint8List);
+  }
+
+  @override
+  void sendInterested() {
+    assert(connected);
+    assert(_socket != null);
+    assert(amInterested == false);
+
+    Log.fine('send interested to ${peer.ip.address}:${peer.port}');
+    _socket!.add(InterestedMessage.instance.toUint8List);
   }
 
   @override

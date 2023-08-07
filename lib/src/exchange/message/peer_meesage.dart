@@ -2,13 +2,10 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:jtorrent/src/extension/uint8_list_extension.dart';
-import 'package:jtorrent/src/model/peer.dart';
 
 import '../../util/common_util.dart';
 
 abstract interface class PeerMessage {
-  Peer get peer;
-
   Uint8List get toUint8List;
 }
 
@@ -84,10 +81,6 @@ class KeepAliveMessage implements PeerMessage {
 
   static const KeepAliveMessage instance = KeepAliveMessage._();
 
-  factory KeepAliveMessage.fromBuffer(List<int> buffer) {
-    return instance;
-  }
-
   @override
   Uint8List get toUint8List => Uint8List(0);
 
@@ -103,10 +96,6 @@ class ChokeMessage implements PeerMessage {
   const ChokeMessage._();
 
   static const ChokeMessage instance = ChokeMessage._();
-
-  factory ChokeMessage.fromBuffer(List<int> buffer) {
-    return instance;
-  }
 
   @override
   Uint8List get toUint8List => Uint8List.fromList([0, 0, 0, 1, typeId]);
@@ -124,10 +113,6 @@ class UnChokeMessage implements PeerMessage {
 
   static const UnChokeMessage instance = UnChokeMessage._();
 
-  factory UnChokeMessage.fromBuffer(List<int> buffer) {
-    return instance;
-  }
-
   @override
   Uint8List get toUint8List => Uint8List.fromList([0, 0, 0, 1, typeId]);
 
@@ -144,10 +129,6 @@ class InterestedMessage implements PeerMessage {
 
   static const InterestedMessage instance = InterestedMessage._();
 
-  factory InterestedMessage.fromBuffer(List<int> buffer) {
-    return instance;
-  }
-
   @override
   Uint8List get toUint8List => Uint8List.fromList([0, 0, 0, 1, typeId]);
 
@@ -163,10 +144,6 @@ class NotInterestedMessage implements PeerMessage {
   const NotInterestedMessage._();
 
   static const NotInterestedMessage instance = NotInterestedMessage._();
-
-  factory NotInterestedMessage.fromBuffer(List<int> buffer) {
-    return instance;
-  }
 
   @override
   Uint8List get toUint8List => Uint8List.fromList([0, 0, 0, 1, typeId]);
@@ -232,10 +209,10 @@ class BitFieldMessage implements PeerMessage {
 
   @override
   Uint8List get toUint8List => Uint8List.fromList([
-        (bitField.length + 1) ~/ (1 << 24),
-        (bitField.length + 1) % (1 << 24) ~/ (1 << 16),
-        (bitField.length + 1) % (1 << 16) ~/ (1 << 8),
-        (bitField.length + 1) % (1 << 8),
+        (bitField.length + 1) ~/ (2 << 24),
+        (bitField.length + 1) % (2 << 24) ~/ (2 << 16),
+        (bitField.length + 1) % (2 << 16) ~/ (2 << 8),
+        (bitField.length + 1) % (2 << 8),
         typeId,
         ...bitField
       ]);
@@ -253,10 +230,10 @@ class RequestMessage implements PeerMessage {
   final int begin;
   final int length;
 
-  const RequestMessage._({required this.index, required this.begin, required this.length});
+  const RequestMessage({required this.index, required this.begin, required this.length});
 
   factory RequestMessage.fromBuffer(List<int> buffer) {
-    return RequestMessage._(
+    return RequestMessage(
       index: buffer[5],
       begin: buffer[6],
       length: buffer[7],
@@ -264,7 +241,25 @@ class RequestMessage implements PeerMessage {
   }
 
   @override
-  Uint8List get toUint8List => Uint8List.fromList([0, 0, 0, 4, typeId, index, begin, length]);
+  Uint8List get toUint8List => Uint8List.fromList([
+        0,
+        0,
+        0,
+        13,
+        typeId,
+        index ~/ (2 << 24),
+        index % (2 << 24) ~/ (2 << 16),
+        index % (2 << 16) ~/ (2 << 8),
+        index % (2 << 8),
+        begin ~/ (2 << 24),
+        begin % (2 << 24) ~/ (2 << 16),
+        begin % (2 << 16) ~/ (2 << 8),
+        begin % (2 << 8),
+        length ~/ (2 << 24),
+        length % (2 << 24) ~/ (2 << 16),
+        length % (2 << 16) ~/ (2 << 8),
+        length % (2 << 8),
+      ]);
 
   @override
   String toString() {
@@ -291,10 +286,10 @@ class PieceMessage implements PeerMessage {
 
   @override
   Uint8List get toUint8List => Uint8List.fromList([
-        (block.length + 3) ~/ (1 << 24),
-        (block.length + 3) % (1 << 24) ~/ (1 << 16),
-        (block.length + 3) % (1 << 16) ~/ (1 << 8),
-        (block.length + 3) % (1 << 8),
+        (block.length + 3) ~/ (2 << 24),
+        (block.length + 3) % (2 << 24) ~/ (2 << 16),
+        (block.length + 3) % (2 << 16) ~/ (2 << 8),
+        (block.length + 3) % (2 << 8),
         typeId,
         index,
         begin,

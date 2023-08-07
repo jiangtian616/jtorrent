@@ -82,7 +82,7 @@ class HttpAnnounceHandler extends AnnounceHandler {
     Set<Peer> peerSet = {};
     for (int i = 0; i < peers.length; i += 6) {
       InternetAddress ip = InternetAddress.fromRawAddress(peers.sublist(i, i + 4), type: InternetAddressType.IPv4);
-      int port = peers[i + 4] * (1 << 8) + peers[i + 5];
+      int port = peers[i + 4] * (2 << 7) + peers[i + 5];
       peerSet.add(Peer(ip: ip, port: port));
     }
 

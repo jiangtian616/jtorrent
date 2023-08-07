@@ -28,6 +28,9 @@ class Torrent {
   /// Free-form name and version of the program used to create the .torrent
   final String? createdBy;
 
+  /// File name(single file) or directory name(multiple files)
+  final String name;
+
   /// File content described in torrent file
   final List<TorrentFile> files;
 
@@ -45,6 +48,7 @@ class Torrent {
     this.createTime,
     this.comment,
     this.createdBy,
+    required this.name,
     required this.files,
     required this.pieceSha1s,
   });
@@ -66,7 +70,8 @@ class Torrent {
       trackers: _parseAnnounces(content['announce'], content['announce-list']),
       pieceLength: _parsePieceLength(content['info']['piece length']),
       pieceSha1s: _parsePieceSha1s(content['info']['pieces']),
-      files: _parseFiles(content['info']['name'], content['info']['length'], content['info']['files']),
+      name: _parseName(content['info']['name']),
+      files: _parseFiles(content['info']['length'], content['info']['files']),
       infoHash: _parseInfoHash(content['info']),
       createTime: _parseCreateTime(content['creation date']),
       comment: _parseComment(content['comment']),
@@ -156,13 +161,12 @@ class Torrent {
     return pieceSha1s;
   }
 
-  static List<TorrentFile> _parseFiles(dynamic name, dynamic length, dynamic files) {
-    String _name = _parseName(name);
+  static List<TorrentFile> _parseFiles(dynamic length, dynamic files) {
     int? _length = _parseLength(length);
 
     /// Single file mode
     if (files is! List || files.isEmpty) {
-      return [TorrentFile(path: _name, length: _length!)];
+      return [TorrentFile(path: '', length: _length!)];
     }
 
     /// Multiple file mode
@@ -181,7 +185,7 @@ class Torrent {
 
       torrentFiles.add(
         TorrentFile(
-          path: join(_name, _parsePath(file['path'])),
+          path: _parsePath(file['path']),
           length: _parseFileLength(file['length']),
         ),
       );
