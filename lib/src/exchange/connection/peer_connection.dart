@@ -15,9 +15,12 @@ abstract class PeerConnection {
 
   bool connecting;
   bool connected;
-  bool illegal;
-  bool handshaked;
+
   DateTime? lastActiveTime;
+  bool illegal;
+  bool haveHandshake;
+  bool peerHaveHandshake;
+  bool sentBitField;
 
   bool amChoking;
   bool amInterested;
@@ -31,9 +34,11 @@ abstract class PeerConnection {
     required this.torrentExchangeInfo,
     this.connecting = false,
     this.connected = false,
-    this.illegal = false,
-    this.handshaked = false,
     this.lastActiveTime,
+    this.illegal = false,
+    this.haveHandshake = false,
+    this.peerHaveHandshake = false,
+    this.sentBitField = false,
     this.amChoking = true,
     this.amInterested = false,
     this.peerChoking = true,
@@ -59,6 +64,8 @@ abstract class PeerConnection {
   void sendRequest(int pieceIndex);
 
   void sendInterested();
+
+  void sendBitField(List<PieceStatus> pieces);
 
   void closeByIllegal() {
     assert(connecting && connected);
@@ -119,6 +126,7 @@ class TcpPeerConnection extends PeerConnection {
   @override
   void sendHandShake() {
     assert(connected);
+    assert(haveHandshake == false);
     assert(_socket != null);
 
     Log.fine('send handshake to ${peer.ip.address}:${peer.port}');
@@ -153,6 +161,17 @@ class TcpPeerConnection extends PeerConnection {
 
     Log.fine('send interested to ${peer.ip.address}:${peer.port}');
     _socket!.add(InterestedMessage.instance.toUint8List);
+  }
+
+  @override
+  void sendBitField(List<PieceStatus> pieces) {
+    assert(connected);
+    assert(_socket != null);
+    assert(sentBitField == false);
+
+    Log.fine('send bitfield to ${peer.ip.address}:${peer.port}');
+    List<bool> boolList = pieces.map((piece) => piece == PieceStatus.downloaded).toList();
+    _socket!.add(BitFieldMessage.fromBoolList(boolList).toUint8List);
   }
 
   @override

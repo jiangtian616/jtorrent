@@ -54,6 +54,7 @@ class Torrent {
   });
 
   static Future<Torrent> fromFile(File file) {
+    /// todo: isolate
     return file.readAsBytes().then((uint8list) => fromUint8List(uint8list));
   }
 

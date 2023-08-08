@@ -20,7 +20,7 @@ class ExchangeManager {
 
   late final List<PeerMessageHandler> _messageHandlers = [
     IllegalPeerMessageHandler(),
-    HandshakePeerMessageHandler(),
+    HandshakePeerMessageHandler(exchangeManager: this),
     KeepAlivePeerMessageHandler(),
     ChokePeerMessageHandler(),
     UnChokePeerMessageHandler(exchangeManager: this),
@@ -44,8 +44,8 @@ class ExchangeManager {
 
     for (Peer peer in exchangeStatusInfo.allKnownPeers) {
       Future<PeerConnection> connectionFuture = _openConnection(exchangeStatusInfo, peer);
-      Future<void> handshakeFuture = connectionFuture.then((connection) => connection.sendHandShake());
-      handshakeFuture.onError((error, stackTrace) => Log.info('Connection error: $peer'));
+      Future<void> handshakeFuture = connectionFuture.then((connection) => _sendHandshake(connection));
+      handshakeFuture.onError((error, stackTrace) => Log.info('Connection error: ${peer.ip.address}:${peer.port}'));
     }
   }
 
@@ -69,6 +69,11 @@ class ExchangeManager {
   PeerConnection _generatePeerConnection(TorrentExchangeInfo torrentExchangeInfo, Peer peer) {
     /// todo
     return TcpPeerConnection(peer: peer, torrentExchangeInfo: torrentExchangeInfo);
+  }
+
+  void _sendHandshake(PeerConnection connection) {
+    connection.sendHandShake();
+    connection.haveHandshake = true;
   }
 
   void _tryRequestPiece(PeerConnection connection) {
@@ -141,7 +146,7 @@ class ExchangeManager {
 
     for (PeerMessageHandler handler in _messageHandlers) {
       if (handler.support(message)) {
-        handler.handle(connection, message);
+        return handler.handle(connection, message);
       }
     }
   }
@@ -170,7 +175,9 @@ class IllegalPeerMessageHandler implements PeerMessageHandler {
 }
 
 class HandshakePeerMessageHandler implements PeerMessageHandler {
-  const HandshakePeerMessageHandler();
+  final ExchangeManager _exchangeManager;
+
+  const HandshakePeerMessageHandler({required ExchangeManager exchangeManager}) : _exchangeManager = exchangeManager;
 
   @override
   bool support(PeerMessage peerMessage) {
@@ -181,10 +188,24 @@ class HandshakePeerMessageHandler implements PeerMessageHandler {
   void handle(PeerConnection connection, PeerMessage peerMessage) {
     assert(support(peerMessage));
 
-    if (connection.handshaked) {
+    if (connection.peerHaveHandshake) {
       Log.info('${connection.peer.ip.address} handshake again');
     }
-    connection.handshaked = true;
+    connection.peerHaveHandshake = true;
+
+    TorrentExchangeInfo? torrentExchangeInfo = _exchangeManager._torrentExchangeMap[connection.infoHash];
+    if (torrentExchangeInfo == null) {
+      Log.warning('Ignore handshake and close connection because no torrent: ${connection.infoHash}');
+      connection.closeByIllegal();
+      return;
+    }
+
+    if (connection.haveHandshake == false) {
+      _exchangeManager._sendHandshake(connection);
+    }
+
+    connection.sendBitField(torrentExchangeInfo.pieces);
+    connection.sentBitField = true;
   }
 }
 

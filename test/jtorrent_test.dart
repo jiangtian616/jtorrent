@@ -22,6 +22,7 @@ void main() {
     });
 
     test('Test announce manager', () async {
+      /// 92078935a0244b8d3733cbb37231a79287f2954c info value:[238-11937)
       Torrent torrent = Torrent.fromFileSync(File('/Users/jtmonster/IdeaProjects/jtorrent/test/torrent/manga.torrent'));
 
       AnnounceManager trackerManager = AnnounceManager(localPort: 6881, compact: true, noPeerId: true);
