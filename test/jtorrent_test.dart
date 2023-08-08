@@ -43,7 +43,7 @@ void main() {
     test('Test handshake message', () async {
       Torrent torrent = Torrent.fromFileSync(File('/Users/jtmonster/IdeaProjects/jtorrent/test/torrent/manga.torrent'));
 
-      ExchangeManager exchangeManager = ExchangeManager(downloadPath: '/Users/JTMonster/IdeaProjects/jtorrent/test');
+      ExchangeManager exchangeManager = ExchangeManager(downloadPath: 'C:\\Users\\JTMonster\\IdeaProjects\\jtorrent\\test');
       AnnounceManager trackerManager = AnnounceManager(localPort: 6881, compact: true, noPeerId: true);
 
       Stream<TorrentAnnounceInfo> stream = trackerManager.scheduleAnnounce(

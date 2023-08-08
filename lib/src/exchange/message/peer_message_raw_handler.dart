@@ -35,7 +35,9 @@ class TcpPeerMessageRawHandler implements PeerMessageRawHandler {
   /// The buffer for the message from socket
   final List<int> _buffer = [];
 
-  /// Peer may send multiple Have messages at once, we stack them together as a single [StackHaveMessage]
+  /// Some clients (Deluge for example) send bitfield with missing pieces even if it has all data. Then it sends rest of pieces as have messages.
+  /// They are saying this helps against ISP filtering of BitTorrent protocol. It is called lazy bitfield. We combine them together as a single [BitFieldMessage]
+  final List<BitFieldMessage> _stackedBitFieldMessages = [];
   final List<HaveMessage> _stackedHaveMessages = [];
 
   /// Add message to this to notify [ExchangeManager]
@@ -101,7 +103,7 @@ class TcpPeerMessageRawHandler implements PeerMessageRawHandler {
       }
     }
 
-    _sendStackHaveMessages();
+    _sendComposedMessage();
   }
 
   bool _isHandshakeMessageHead() {
@@ -181,31 +183,67 @@ class TcpPeerMessageRawHandler implements PeerMessageRawHandler {
     PeerMessage? peerMessage;
     switch (typeId) {
       case ChokeMessage.typeId:
-        peerMessage = ChokeMessage.instance;
+        if (length != 1) {
+          peerMessage = IllegalMessage(message: 'Invalid choke message length $length');
+        } else {
+          peerMessage = ChokeMessage.instance;
+        }
         break;
       case UnChokeMessage.typeId:
-        peerMessage = UnChokeMessage.instance;
+        if (length != 1) {
+          peerMessage = IllegalMessage(message: 'Invalid unChoke message length $length');
+        } else {
+          peerMessage = UnChokeMessage.instance;
+        }
         break;
       case InterestedMessage.typeId:
-        peerMessage = InterestedMessage.instance;
+        if (length != 1) {
+          peerMessage = IllegalMessage(message: 'Invalid interested message length $length');
+        } else {
+          peerMessage = InterestedMessage.instance;
+        }
         break;
       case NotInterestedMessage.typeId:
-        peerMessage = NotInterestedMessage.instance;
+        if (length != 1) {
+          peerMessage = IllegalMessage(message: 'Invalid notInterested message length $length');
+        } else {
+          peerMessage = NotInterestedMessage.instance;
+        }
         break;
       case HaveMessage.typeId:
-        _stackedHaveMessages.add(HaveMessage.fromBuffer(segment));
+        if (length != 5) {
+          peerMessage = IllegalMessage(message: 'Invalid have message length $length');
+        } else {
+          _stackedHaveMessages.add(HaveMessage.fromBuffer(segment));
+        }
         break;
       case BitFieldMessage.typeId:
-        peerMessage = BitFieldMessage.fromBuffer(segment);
+        if (length < 1) {
+          peerMessage = IllegalMessage(message: 'Invalid bitField message length $length');
+        } else {
+          _stackedBitFieldMessages.add(BitFieldMessage.fromBuffer(segment));
+        }
         break;
       case RequestMessage.typeId:
-        peerMessage = RequestMessage.fromBuffer(segment);
+        if (length != 13) {
+          peerMessage = IllegalMessage(message: 'Invalid request message length $length');
+        } else {
+          peerMessage = RequestMessage.fromBuffer(segment);
+        }
         break;
       case PieceMessage.typeId:
-        peerMessage = PieceMessage.fromBuffer(segment);
+        if (length < 9) {
+          peerMessage = IllegalMessage(message: 'Invalid piece message length $length');
+        } else {
+          peerMessage = PieceMessage.fromBuffer(segment);
+        }
         break;
       case CancelMessage.typeId:
-        peerMessage = CancelMessage.fromBuffer(segment);
+        if (length != 13) {
+          peerMessage = IllegalMessage(message: 'Invalid cancel message length $length');
+        } else {
+          peerMessage = CancelMessage.fromBuffer(segment);
+        }
         break;
       default:
         peerMessage = IllegalMessage(message: 'Unknown message type id: $typeId');
@@ -216,12 +254,22 @@ class TcpPeerMessageRawHandler implements PeerMessageRawHandler {
     }
   }
 
-  void _sendStackHaveMessages() {
-    if (_stackedHaveMessages.isEmpty) {
+  void _sendComposedMessage() {
+    if (_stackedBitFieldMessages.isEmpty && _stackedHaveMessages.isEmpty) {
       return;
     }
 
-    _peerMessageStreamController.sink.add(StackHaveMessage.fromHaveMessage(_stackedHaveMessages));
+    if (_stackedBitFieldMessages.isEmpty && _stackedHaveMessages.isNotEmpty) {
+      _peerMessageStreamController.sink.add(ComposedHaveMessage.composed(_stackedHaveMessages));
+    } else if (_stackedBitFieldMessages.isNotEmpty && _stackedHaveMessages.isEmpty) {
+      for (BitFieldMessage bitFieldMessage in _stackedBitFieldMessages) {
+        _peerMessageStreamController.sink.add(bitFieldMessage);
+      }
+    } else {
+      _peerMessageStreamController.sink.add(BitFieldMessage.composed(_stackedBitFieldMessages, _stackedHaveMessages));
+    }
+
+    _stackedBitFieldMessages.clear();
     _stackedHaveMessages.clear();
   }
 }

@@ -6,14 +6,13 @@ import 'package:jtorrent/src/exception/torrent_parse_exception.dart';
 import 'package:jtorrent/src/extension/uint8_list_extension.dart';
 import 'package:jtorrent/src/extension/utf8_extension.dart';
 import 'package:jtorrent_bencoding/jtorrent_bencoding.dart';
-import 'package:path/path.dart';
 
 /// http://bittorrent.org/beps/bep_0003.html
 class Torrent {
   /// Tracker addresses
   final List<List<Uri>> trackers;
 
-  /// Size of each piece in bytes
+  /// Size of each piece in bytes, usually 2^18 = 256KB
   final int pieceLength;
 
   /// The "info hash" of the torrent, 20-bytes
@@ -142,6 +141,10 @@ class Torrent {
           'Torrent content is invalid, [pieceLength] is not a int, pieceLength: $pieceLength is a ${pieceLength.runtimeType}');
     }
 
+    if (pieceLength & 1 == 1) {
+      throw TorrentParseException('Torrent content is invalid, [pieceLength] is not a power of 2, pieceLength: $pieceLength');
+    }
+    
     return pieceLength;
   }
 

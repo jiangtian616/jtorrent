@@ -11,6 +11,8 @@ class Log {
     _logger.level = level;
   }
 
+  static void finest(Object? message, [Object? error, StackTrace? stackTrace]) => _logger.log(Level.FINEST, message, error, stackTrace);
+  
   static void fine(Object? message, [Object? error, StackTrace? stackTrace]) => _logger.log(Level.FINE, message, error, stackTrace);
 
   static void info(Object? message, [Object? error, StackTrace? stackTrace]) => _logger.log(Level.INFO, message, error, stackTrace);

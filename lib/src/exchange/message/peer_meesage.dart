@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:jtorrent/src/constant/common_constants.dart';
 import 'package:jtorrent/src/extension/uint8_list_extension.dart';
 
 import '../../util/common_util.dart';
@@ -174,13 +175,13 @@ class HaveMessage implements PeerMessage {
 }
 
 /// Peer may send multiple Have messages at once, we stack them together
-class StackHaveMessage extends HaveMessage {
+class ComposedHaveMessage extends HaveMessage {
   final List<int> pieceIndexes;
 
-  const StackHaveMessage._({required this.pieceIndexes}) : super._(pieceIndex: 0);
+  const ComposedHaveMessage._({required this.pieceIndexes}) : super._(pieceIndex: 0);
 
-  factory StackHaveMessage.fromHaveMessage(List<HaveMessage> haveMessages) {
-    return StackHaveMessage._(pieceIndexes: haveMessages.map((m) => m.pieceIndex).toList());
+  factory ComposedHaveMessage.composed(List<HaveMessage> haveMessages) {
+    return ComposedHaveMessage._(pieceIndexes: haveMessages.map((m) => m.pieceIndex).toList());
   }
 
   @override
@@ -195,31 +196,47 @@ class StackHaveMessage extends HaveMessage {
 class BitFieldMessage implements PeerMessage {
   static const int typeId = 5;
 
+  final bool composed;
   final Uint8List bitField;
 
-  BitFieldMessage({required this.bitField});
+  BitFieldMessage({required this.composed, required this.bitField});
 
   factory BitFieldMessage.fromBoolList(List<bool> pieces) {
-    return BitFieldMessage(bitField: CommonUtil.boolListToBitmap(pieces));
+    return BitFieldMessage(composed: false, bitField: CommonUtil.boolListToBitmap(pieces));
   }
 
   factory BitFieldMessage.fromBuffer(List<int> buffer) {
-    return BitFieldMessage(bitField: Uint8List.fromList(buffer.sublist(5)));
+    return BitFieldMessage(composed: false, bitField: Uint8List.fromList(buffer.sublist(5)));
+  }
+
+  factory BitFieldMessage.composed(List<BitFieldMessage> bitFieldMessages, List<HaveMessage> haveMessages) {
+    List<int> composedBitField = bitFieldMessages.first.bitField;
+
+    for (BitFieldMessage message in bitFieldMessages) {
+      for (int i = 0; i < composedBitField.length; i++) {
+        composedBitField[i] |= message.bitField[i];
+      }
+    }
+    for (HaveMessage message in haveMessages) {
+      composedBitField[message.pieceIndex ~/ 8] |= 1 << (7 - message.pieceIndex % 8);
+    }
+
+    return BitFieldMessage(composed: true, bitField: Uint8List.fromList(composedBitField));
   }
 
   @override
   Uint8List get toUint8List => Uint8List.fromList([
-        (bitField.length + 1) ~/ (2 << 24),
-        (bitField.length + 1) % (2 << 24) ~/ (2 << 16),
-        (bitField.length + 1) % (2 << 16) ~/ (2 << 8),
-        (bitField.length + 1) % (2 << 8),
+        (bitField.length + 1) ~/ (1 << 24),
+        (bitField.length + 1) % (1 << 24) ~/ (1 << 16),
+        (bitField.length + 1) % (1 << 16) ~/ (1 << 8),
+        (bitField.length + 1) % (1 << 8),
         typeId,
         ...bitField
       ]);
 
   @override
   String toString() {
-    return 'BitFieldMessage{bitField: $bitField}';
+    return 'BitFieldMessage{composed: $composed, bitField: $bitField}';
   }
 }
 
@@ -234,9 +251,9 @@ class RequestMessage implements PeerMessage {
 
   factory RequestMessage.fromBuffer(List<int> buffer) {
     return RequestMessage(
-      index: buffer[5],
-      begin: buffer[6],
-      length: buffer[7],
+      index: (buffer[5] << 24) | (buffer[6] << 16) | (buffer[7] << 8) | buffer[8],
+      begin: (buffer[9] << 24) | (buffer[10] << 16) | (buffer[11] << 8) | buffer[12],
+      length: (buffer[13] << 24) | (buffer[14] << 16) | (buffer[15] << 8) | buffer[16],
     );
   }
 
@@ -247,18 +264,18 @@ class RequestMessage implements PeerMessage {
         0,
         13,
         typeId,
-        index ~/ (2 << 24),
-        index % (2 << 24) ~/ (2 << 16),
-        index % (2 << 16) ~/ (2 << 8),
-        index % (2 << 8),
-        begin ~/ (2 << 24),
-        begin % (2 << 24) ~/ (2 << 16),
-        begin % (2 << 16) ~/ (2 << 8),
-        begin % (2 << 8),
-        length ~/ (2 << 24),
-        length % (2 << 24) ~/ (2 << 16),
-        length % (2 << 16) ~/ (2 << 8),
-        length % (2 << 8),
+        index ~/ (1 << 24),
+        index % (1 << 24) ~/ (1 << 16),
+        index % (1 << 16) ~/ (1 << 8),
+        index % (1 << 8),
+        begin ~/ (1 << 24),
+        begin % (1 << 24) ~/ (1 << 16),
+        begin % (1 << 16) ~/ (1 << 8),
+        begin % (1 << 8),
+        length ~/ (1 << 24),
+        length % (1 << 24) ~/ (1 << 16),
+        length % (1 << 16) ~/ (1 << 8),
+        length % (1 << 8),
       ]);
 
   @override
@@ -278,27 +295,33 @@ class PieceMessage implements PeerMessage {
 
   factory PieceMessage.fromBuffer(List<int> buffer) {
     return PieceMessage._(
-      index: buffer[5],
-      begin: buffer[6],
-      block: Uint8List.fromList(buffer.sublist(7)),
+      index: (buffer[5] << 24) + (buffer[6] << 16) + (buffer[7] << 8) + buffer[8],
+      begin: (buffer[9] << 24) + (buffer[10] << 16) + (buffer[11] << 8) + buffer[12],
+      block: Uint8List.fromList(buffer.sublist(13)),
     );
   }
 
   @override
   Uint8List get toUint8List => Uint8List.fromList([
-        (block.length + 3) ~/ (2 << 24),
-        (block.length + 3) % (2 << 24) ~/ (2 << 16),
-        (block.length + 3) % (2 << 16) ~/ (2 << 8),
-        (block.length + 3) % (2 << 8),
+        (block.length + 9) ~/ (1 << 24),
+        (block.length + 9) % (1 << 24) ~/ (1 << 16),
+        (block.length + 9) % (1 << 16) ~/ (1 << 8),
+        (block.length + 9) % (1 << 8),
         typeId,
-        index,
-        begin,
+        index ~/ (1 << 24),
+        index % (1 << 24) ~/ (1 << 16),
+        index % (1 << 16) ~/ (1 << 8),
+        index % (1 << 8),
+        begin ~/ (1 << 24),
+        begin % (1 << 24) ~/ (1 << 16),
+        begin % (1 << 16) ~/ (1 << 8),
+        begin % (1 << 8),
         ...block
       ]);
 
   @override
   String toString() {
-    return 'PieceMessage{index: $index, begin: $begin, block: $block}';
+    return 'PieceMessage{index: $index, subIndex: ${begin ~/ CommonConstants.subPieceLength}, block.length: ${block.length}}';
   }
 }
 
