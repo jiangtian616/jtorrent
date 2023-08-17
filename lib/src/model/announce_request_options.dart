@@ -1,8 +1,10 @@
 import 'dart:io';
 
+import '../announce/tracker.dart';
+
 class AnnounceRequestOptions {
   /// Request type
-  final TrackerRequestType type;
+  final AnnounceEventType type;
 
   /// Inherited from [TrackerManager.localIp]
   final InternetAddress? localIp;
@@ -40,5 +42,3 @@ class AnnounceRequestOptions {
     required this.left,
   });
 }
-
-enum TrackerRequestType { started, completed, stopped }

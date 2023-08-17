@@ -1,7 +1,7 @@
-class TrackerException implements Exception {
+class AnnounceException implements Exception {
   final String message;
 
-  TrackerException(this.message);
+  const AnnounceException(this.message);
 
   @override
   String toString() => 'TrackerException: $message';

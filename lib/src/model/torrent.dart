@@ -12,6 +12,8 @@ class Torrent {
   /// Tracker addresses
   final List<List<Uri>> trackers;
 
+  List<Uri> get allTrackers => trackers.expand((t) => t).toList().toList();
+
   /// Size of each piece in bytes, usually 2^18 = 256KB
   final int pieceLength;
 
@@ -144,7 +146,7 @@ class Torrent {
     if (pieceLength & 1 == 1) {
       throw TorrentParseException('Torrent content is invalid, [pieceLength] is not a power of 2, pieceLength: $pieceLength');
     }
-    
+
     return pieceLength;
   }
 

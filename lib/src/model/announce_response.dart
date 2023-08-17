@@ -4,14 +4,11 @@ import 'package:jtorrent/src/model/peer.dart';
 class AnnounceResponse {
   final bool success;
 
-  final Uri tracker;
-
   final String? failureReason;
 
   final AnnounceSuccessResponse? result;
 
   AnnounceResponse.success({
-    required this.tracker,
     String? warning,
     int? completePeerCount,
     int? inCompletePeerCount,
@@ -29,7 +26,7 @@ class AnnounceResponse {
           peers: peers,
         );
 
-  AnnounceResponse.failed({required this.tracker, required this.failureReason})
+  AnnounceResponse.failed({required this.failureReason})
       : success = false,
         result = null;
 

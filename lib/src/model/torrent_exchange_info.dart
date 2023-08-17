@@ -4,7 +4,7 @@ import 'package:jtorrent/src/constant/common_constants.dart';
 import 'package:jtorrent/src/model/peer.dart';
 import 'package:jtorrent/src/model/torrent.dart';
 
-import '../exchange/connection/peer_connection.dart';
+import '../peer/peer_connection.dart';
 
 class TorrentExchangeInfo {
   /// Inherited from [Torrent]

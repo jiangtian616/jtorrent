@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:jtorrent/src/constant/common_constants.dart';
 import 'package:jtorrent/src/extension/uint8_list_extension.dart';
 
-import '../../util/common_util.dart';
+import '../util/common_util.dart';
 
 abstract interface class PeerMessage {
   Uint8List get toUint8List;
