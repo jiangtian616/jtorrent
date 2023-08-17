@@ -1,17 +1,16 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:jtorrent/src/model/announce_response.dart';
 import 'package:jtorrent/src/peer/file/file_manager.dart';
 import 'package:jtorrent/src/peer/piece/piece_manager.dart';
 import 'package:jtorrent/src/util/common_util.dart';
 
 import '../announce/announce_manager.dart';
 import '../announce/announce_request_options_provider.dart';
+import '../model/peer.dart';
 import '../model/torrent.dart';
 import '../peer/peer_manager.dart';
-
-const _MAX_OUT_PEERS = 50;
-const _MAX_IN_PEERS = 10;
 
 abstract class TorrentTask {
   TorrentTask._();
@@ -43,12 +42,12 @@ class _TorrentTask extends TorrentTask implements AnnounceConfigProvider {
   final Torrent _torrent;
 
   final String _savePath;
+  late final Uint8List _localPeerId;
 
   late final AnnounceManager _announceManager;
-
   late final PeerManager _peerManager;
-
-  late final Uint8List _localPeerId;
+  late final PieceManager _pieceManager;
+  late final FileManager _fileManager;
 
   ServerSocket? _serverSocket;
 
@@ -76,13 +75,13 @@ class _TorrentTask extends TorrentTask implements AnnounceConfigProvider {
   int get localPort => _serverSocket!.port;
 
   @override
-  int get left => throw UnimplementedError();
+  int get left => _torrent.files.fold(0, (previousValue, element) => previousValue + element.length) - downloaded;
 
   @override
-  int get downloaded => throw UnimplementedError();
+  int get downloaded => _pieceManager.bitField.fold(0, (previousValue, element) => previousValue + (element ? _torrent.pieceLength : 0));
 
   @override
-  int get uploaded => throw UnimplementedError();
+  int get uploaded => _peerManager.uploadedBytes;
 
   @override
   Uint8List get peerId => _localPeerId;
@@ -97,8 +96,9 @@ class _TorrentTask extends TorrentTask implements AnnounceConfigProvider {
     _announceManager = AnnounceManager(announceConfigProvider: this);
     _announceManager.addTrackerServers(_torrent.allTrackers);
 
-    PieceManager _pieceManager = PieceManager(torrent: _torrent);
-    FileManager _fileManager = FileManager(savePath: _savePath);
+    _pieceManager = PieceManager.fromTorrent(_torrent);
+    _fileManager = FileManager.fromTorrent(savePath: _savePath, torrent: _torrent);
+    await _fileManager.init();
 
     _peerManager = PeerManager(
       infoHash: _torrent.infoHash,
@@ -106,12 +106,7 @@ class _TorrentTask extends TorrentTask implements AnnounceConfigProvider {
       fileManager: _fileManager,
     );
 
-    _pieceManager = PieceManager(
-      torrent: _torrent,
-      peerManager: _peerManager,
-      savePath: _savePath,
-    );
-
+    _announceManager.addOnNewPeersFoundCallback(_processOnNewPeers);
     _announceManager.start();
   }
 
@@ -124,5 +119,11 @@ class _TorrentTask extends TorrentTask implements AnnounceConfigProvider {
   @override
   Future<void> stop() {
     throw UnimplementedError();
+  }
+
+  void _processOnNewPeers(AnnounceSuccessResponse response) {
+    for (Peer peer in response.peers) {
+      _peerManager.addNewPeer(peer);
+    }
   }
 }

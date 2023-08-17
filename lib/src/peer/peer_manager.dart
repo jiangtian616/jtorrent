@@ -1,35 +1,38 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
 import 'package:crypto/crypto.dart';
 import 'package:jtorrent/src/constant/common_constants.dart';
 import 'package:jtorrent/src/extension/uint8_list_extension.dart';
-import 'package:jtorrent/src/model/torrent.dart';
-import 'package:jtorrent/src/peer/piece/piece_provider.dart';
+import 'package:jtorrent/src/peer/piece/piece_manager.dart';
 import 'package:jtorrent/src/util/log_util.dart';
-import 'package:path/path.dart';
 
-import '../model/torrent_exchange_info.dart';
 import '../model/peer.dart';
 import 'peer_connection.dart';
 import 'file/file_manager.dart';
 import 'peer_meesage.dart';
 
 class PeerManager {
-  PeerManager({required Uint8List infoHash, required PieceProvider pieceProvider, required FileManager fileManager})
+  int maxRequestCountPerPeer = 8;
+
+  int get uploadedBytes => _uploadedBytes;
+
+  PeerManager({required Uint8List infoHash, required PieceManager pieceManager, required FileManager fileManager})
       : _infoHash = infoHash,
-        _pieceProvider = pieceProvider,
+        _pieceManager = pieceManager,
         _fileManager = fileManager;
 
   final Uint8List _infoHash;
 
-  final PieceProvider _pieceProvider;
+  final PieceManager _pieceManager;
 
   final FileManager _fileManager;
 
   final Map<Peer, PeerConnection> _peerConnectionMap = {};
+
+  int _uploadedBytes = 0;
 
   void addNewPeer(Peer peer) {
     if (_peerConnectionMap.containsKey(peer)) {
@@ -45,8 +48,13 @@ class PeerManager {
   }
 
   void pause() {}
-  
-  void resume(){}
+
+  void resume() {}
+
+  PeerConnection _generatePeerConnection(Peer peer) {
+    /// todo
+    return TcpPeerConnection(peer: peer);
+  }
 
   void _hookPeerConnection(PeerConnection connection) {
     connection.addOnConnectedCallBack(() => _processConnected(connection));
@@ -88,13 +96,29 @@ class PeerManager {
     connection.removeOnCancelMessageCallBack((message) => _processCancelMessage(connection, message));
   }
 
-  void _processConnected(PeerConnection connection) {}
+  void _processConnected(PeerConnection connection) {
+    assert(connection.haveHandshake == false);
 
-  void _processConnectFailed(PeerConnection connection, dynamic error) {}
+    Log.finest('Connected to ${connection.peer.ip.address}:${connection.peer.port}');
 
-  void _processConnectInterrupted(PeerConnection connection, dynamic error) {}
+    _sendHandshake(connection);
+  }
 
-  void _processDisconnected(PeerConnection connection) {}
+  void _processConnectFailed(PeerConnection connection, dynamic error) {
+    Log.finest('Connect to ${connection.peer.ip.address}:${connection.peer.port} failed, error: $error');
+
+    connection.close();
+  }
+
+  void _processConnectInterrupted(PeerConnection connection, dynamic error) {
+    Log.finest('Connect to ${connection.peer.ip.address}:${connection.peer.port} interrupted, error: $error');
+
+    connection.close();
+  }
+
+  void _processDisconnected(PeerConnection connection) {
+    connection.close();
+  }
 
   void _processIllegalMessage(PeerConnection connection, IllegalMessage message) {
     Log.warning('Receive illegal message from ${connection.peer.ip.address}:${connection.peer.port} :${message.message}');
@@ -109,7 +133,7 @@ class PeerManager {
     }
     connection.peerHaveHandshake = true;
 
-    if (_infoHash != message.infoHash) {
+    if (!ListEquality<int>().equals(message.infoHash, _infoHash)) {
       Log.warning(
           'Receive Invalid handshake message from ${connection.peer.ip.address}:${connection.peer.port}, info hash not match:  ${message.infoHash.toHexString} != ${_infoHash.toHexString}');
       return connection.close(illegal: true);
@@ -119,7 +143,7 @@ class PeerManager {
       _sendHandshake(connection);
     }
 
-    connection.sendBitField(_pieceProvider.pieces);
+    connection.sendBitField(_pieceManager.bitField);
     connection.haveSentBitField = true;
   }
 
@@ -158,18 +182,18 @@ class PeerManager {
     Log.finest('Receive have message from ${connection.peer.ip.address}:${connection.peer.port}, piece indexes: ${message.pieceIndexes}');
 
     for (int pieceIndex in message.pieceIndexes) {
-      if (pieceIndex >= connection.peerPieces.length) {
-        Log.severe('StackHaveMessage pieceIndex $pieceIndex >= pieces.length ${connection.peerPieces.length}');
+      if (pieceIndex >= _pieceManager.pieceCount) {
+        Log.severe('StackHaveMessage pieceIndex $pieceIndex >= pieces.length ${_pieceManager.pieceCount}');
         continue;
       }
-      connection.peerPieces[pieceIndex] = true;
+      _pieceManager.updatePeerPiece(connection.peer, pieceIndex, true);
     }
   }
 
   void _processBitfieldMessage(PeerConnection connection, BitFieldMessage message) {
     Log.finest(
         'Receive bitfield message from ${connection.peer.ip.address}:${connection.peer.port}, composed: ${message.composed}, bitfield: ${message.bitField}');
-
+    
     for (int i = 0; i < message.bitField.length; i++) {
       int byte = message.bitField[i];
 
@@ -184,8 +208,8 @@ class PeerManager {
       for (int j = 0; j < 8; j++) {
         if ((byte & (1 << (7 - j))) != 0) {
           int pieceIndex = i * 8 + j;
-          if (pieceIndex < connection.peerPieces.length) {
-            connection.peerPieces[pieceIndex] = true;
+          if (pieceIndex < _pieceManager.pieceCount) {
+            _pieceManager.updatePeerPiece(connection.peer, pieceIndex, true);
           }
         }
       }
@@ -203,20 +227,9 @@ class PeerManager {
     Log.finest(
         'Receive piece message from ${connection.peer.ip.address}:${connection.peer.port}, index: ${message.index}, begin: ${message.begin}, length: ${message.block.length}');
 
-    if (message.index >= connection.peerPieces.length) {
-      Log.severe('PieceMessage pieceIndex ${message.index} >= pieces.length ${connection.peerPieces.length}');
+    if (message.index >= _pieceManager.pieceCount) {
+      Log.severe('PieceMessage pieceIndex ${message.index} >= pieces.length ${_pieceManager.pieceCount}');
       return connection.close(illegal: true);
-    }
-
-    TorrentExchangeInfo? torrentExchangeInfo = _torrentExchangeMap[connection.infoHash];
-    if (torrentExchangeInfo == null) {
-      Log.warning('TorrentExchangeInfo not found for ${connection.infoHash.toHexString} when save piece: ${pieceMessage.index}}');
-      return connection.close();
-    }
-
-    if (torrentExchangeInfo.pieces[message.index] == PieceStatus.downloaded) {
-      Log.info('${connection.infoHash.toHexString}\'s Piece ${message.index} already downloaded');
-      return;
     }
 
     if (message.block.length != CommonConstants.subPieceLength) {
@@ -231,142 +244,87 @@ class PeerManager {
 
     int subPieceIndex = message.begin ~/ CommonConstants.subPieceLength;
 
-    if (subPieceIndex >= torrentExchangeInfo.subPieces[message.index].length) {
-      Log.warning('sub piece index $subPieceIndex >= sub piece count ${torrentExchangeInfo.subPieces[message.index].length}');
+    if (subPieceIndex >= _pieceManager.subPieceCount) {
+      Log.warning('sub piece index $subPieceIndex >= sub piece count ${_pieceManager.subPieceCount}');
       return connection.close(illegal: true);
     }
 
-    if (torrentExchangeInfo.subPieces[message.index][subPieceIndex] == true) {
-      Log.info('${connection.infoHash.toHexString}\'s Piece ${message.index} sub piece $subPieceIndex already downloaded');
+    if (_pieceManager.pieceCompleted(message.index)) {
+      Log.fine('Piece ${message.index} already downloaded of ${_infoHash.toHexString}');
       return;
     }
 
-    String savePath = _computePiecePath(torrentExchangeInfo.name, message.index);
+    if (_pieceManager.subPieceCompleted(message.index, subPieceIndex)) {
+      Log.fine('Sub piece $subPieceIndex of piece ${message.index} already downloaded of ${_infoHash.toHexString}');
+      return;
+    }
 
-    _saveSubPiece(savePath, message.begin, message.block).then((_) {
-      Log.fine('save ${connection.infoHash.toHexString}\'s piece ${message.index} subPiece $subPieceIndex success');
-
-      torrentExchangeInfo.subPieces[message.index][subPieceIndex] = true;
-      _checkAllSubPiecesDownloaded(torrentExchangeInfo, message.index, savePath);
-    }).onError((error, stackTrace) {
-      Log.severe('save ${connection.infoHash.toHexString}\'s piece ${message.index} subPiece $subPieceIndex failed: $error');
-
-      /// todo: send request message again
+    _fileManager.write(message.index * _pieceManager.pieceLength + message.begin, message.block).then((bool success) {
+      if (success) {
+        _pieceManager.updateLocalSubPiece(message.index, subPieceIndex, PieceStatus.downloaded);
+        _checkAllSubPiecesDownloaded(connection, message.index);
+      } else {
+        _managePieceRequest(connection);
+      }
     });
   }
 
-  Future<void> _saveSubPiece(String savePath, int position, Uint8List block) async {
-    File pieceFile = File(savePath);
-    RandomAccessFile f = await pieceFile.open(mode: FileMode.writeOnlyAppend);
-
-    try {
-      await f.setPosition(position);
-      await f.writeFrom(block);
-    } on Exception catch (e) {
-      await f.close();
-      rethrow;
-    }
-  }
-
-  Future<void> _checkAllSubPiecesDownloaded(TorrentExchangeInfo torrentExchangeInfo, int pieceIndex, String savePath) async {
-    if (torrentExchangeInfo.subPieces[pieceIndex].any((subPiece) => subPiece == false)) {
+  Future<void> _checkAllSubPiecesDownloaded(PeerConnection connection, int pieceIndex) async {
+    if (!_pieceManager.pieceCompleted(pieceIndex)) {
       return;
     }
 
-    Log.fine('${torrentExchangeInfo.infoHash.toHexString}\'s piece $pieceIndex download success, try check hash');
+    Log.fine('Piece $pieceIndex of ${_infoHash.toHexString} downloaded, start hash check');
 
-    File pieceFile = File(savePath);
-    RandomAccessFile f = await pieceFile.open(mode: FileMode.read);
-
+    Uint8List bytes;
     try {
-      List<int> bytes = Uint8List(torrentExchangeInfo.pieceLength);
-      await f.readInto(bytes);
-      List<int> hash = sha1.convert(bytes).bytes;
-
-      if (ListEquality<int>().equals(hash, torrentExchangeInfo.pieceSha1s[pieceIndex])) {
-        Log.fine('${torrentExchangeInfo.infoHash.toHexString}\'s piece $pieceIndex hash check success');
-
-        torrentExchangeInfo.pieces[pieceIndex] = PieceStatus.downloaded;
-        await f.flush();
-
-        _checkAllPiecesDownloaded(torrentExchangeInfo);
-
-        /// todo: send have message to all peers
-      } else {
-        Log.severe('${torrentExchangeInfo.infoHash.toHexString}\'s piece $pieceIndex hash check failed');
-
-        torrentExchangeInfo.subPieces[pieceIndex].fillRange(0, torrentExchangeInfo.subPieces[pieceIndex].length, false);
-        await f.truncate(0);
-      }
+      bytes = await _fileManager.read(pieceIndex * _pieceManager.pieceLength, _pieceManager.pieceLength);
     } on Exception catch (e) {
-      await f.close();
+      _pieceManager.resetLocalPieces(pieceIndex);
+      return _managePieceRequest(connection);
+    }
+
+    bool success = _pieceManager.checkHash(pieceIndex, sha1.convert(bytes).bytes);
+
+    if (success) {
+      Log.fine('${_infoHash.toHexString}\'s piece $pieceIndex hash check success');
+      _checkAllPiecesDownloaded();
+
+      /// todo: send have message to all peers
+    } else {
+      Log.severe('${_infoHash.toHexString}\'s piece $pieceIndex hash check failed, delete piece file');
+      _pieceManager.resetLocalPieces(pieceIndex);
+      _managePieceRequest(connection);
     }
   }
 
-  void _checkAllPiecesDownloaded(TorrentExchangeInfo torrentExchangeInfo) {
-    if (!torrentExchangeInfo.allPiecesDownloaded) {
+  void _checkAllPiecesDownloaded() {
+    if (!_pieceManager.completed) {
       return;
     }
 
-    Log.fine('${torrentExchangeInfo.infoHash.toHexString} download success');
+    Log.fine('All pieces of ${_infoHash.toHexString} downloaded, start merge pieces');
+
+    /// todo
   }
 
   void _processCancelMessage(PeerConnection connection, CancelMessage message) {}
 
-  void addNewTorrentTask(Torrent torrent, Set<Peer> peers) {
-    TorrentExchangeInfo? exchangeStatusInfo = _torrentExchangeMap[torrent.infoHash];
-
-    if (exchangeStatusInfo == null) {
-      exchangeStatusInfo = TorrentExchangeInfo.fromTorrent(torrent: torrent, peers: peers);
-      _torrentExchangeMap[torrent.infoHash] = exchangeStatusInfo;
-    } else {
-      exchangeStatusInfo.allKnownPeers.addAll(peers);
-    }
-
-    for (Peer peer in exchangeStatusInfo.allKnownPeers) {
-      /// todo ipv6 peers
-      Future<PeerConnection> connectionFuture = _openConnection(exchangeStatusInfo, peer);
-      Future<void> handshakeFuture = connectionFuture.then((connection) => _sendHandshake(connection));
-      handshakeFuture.onError((error, stackTrace) => Log.finest('Connection error: ${peer.ip.address}:${peer.port}'));
-    }
-  }
-
-  Future<PeerConnection> _openConnection(Peer peer) async {
-    PeerConnection? connection = torrentExchangeInfo.peerConnectionMap[peer];
-    if (connection == null) {
-      connection = _generatePeerConnection(peer);
-      torrentExchangeInfo.peerConnectionMap[peer] = connection;
-    }
-
-    if (connection.connecting || connection.connected) {
-      return connection;
-    }
-
-    await connection.connect();
-    connection.listen((PeerMessage data) => _onPeerMessage(connection!, data));
-
-    return connection;
-  }
-
-  PeerConnection _generatePeerConnection(Peer peer) {
-    /// todo
-    return TcpPeerConnection(peer: peer);
-  }
-
   void _sendHandshake(PeerConnection connection) {
-    connection.sendHandShake();
+    connection.sendHandShake(_infoHash);
     connection.haveHandshake = true;
   }
 
   void _managePieceRequest(PeerConnection connection) {
-    if (connection.torrentExchangeInfo.allPiecesDownloaded) {
-      Log.info('Ignore request because all pieces downloaded: ${connection.infoHash}');
+    if (_pieceManager.completed) {
+      Log.info('Ignore piece request because all pieces downloaded: ${_infoHash.toHexString}');
       return;
     }
 
-    List<int> targetPieceIndexes = _computePieceIndexesToDownload(connection);
-    if (targetPieceIndexes.isEmpty) {
-      Log.fine('Ignore request because no piece to request: ${connection.infoHash.toHexString}');
+    int? targetPieceIndex = _pieceManager.selectPieceIndexToDownload(connection.peer);
+    if (targetPieceIndex == null) {
+      Log.fine(
+          'Ignore piece request because no piece to request to ${connection.peer.ip.address}:${connection.peer.port} of ${_infoHash.toHexString}');
       return;
     }
 
@@ -384,62 +342,19 @@ class PeerManager {
       return;
     }
 
-    /// compute again in case of update during previous operation
-    targetPieceIndexes = _computePieceIndexesToDownload(connection);
-    if (targetPieceIndexes.isEmpty) {
-      Log.fine('Ignore request because no piece to request: ${connection.infoHash}');
+    int? targetSubPieceIndex = _pieceManager.selectSubPieceIndexToDownload(targetPieceIndex);
+    if (targetSubPieceIndex == null) {
+      Log.fine(
+          'Ignore piece request because no sub piece to request to ${connection.peer.ip.address}:${connection.peer.port} of ${_infoHash.toHexString}');
       return;
     }
 
-    List<int> selectedPieceIndexes = _selectPieceIndexes(connection.torrentExchangeInfo, targetPieceIndexes);
+    _pieceManager.updateLocalSubPiece(targetPieceIndex, targetSubPieceIndex, PieceStatus.downloading);
 
-    for (int pieceIndex in selectedPieceIndexes) {
-      connection.torrentExchangeInfo.pieces[pieceIndex] = PieceStatus.downloading;
+    connection.sendRequest(targetPieceIndex, targetSubPieceIndex);
 
-      File pieceFile = File(_computePiecePath(connection.torrentExchangeInfo.name, pieceIndex));
-      pieceFile.createSync(recursive: true, exclusive: false);
-
-      for (int subPieceIndex = 0; subPieceIndex < connection.torrentExchangeInfo.subPieces[subPieceIndex].length; subPieceIndex++) {
-        if (connection.torrentExchangeInfo.subPieces[pieceIndex][subPieceIndex] == false) {
-          connection.sendRequest(pieceIndex, subPieceIndex);
-        }
-      }
-    }
-  }
-
-  List<int> _computePieceIndexesToDownload(PeerConnection connection) {
-    List<int> targetPieceIndexes = [];
-    for (int i = 0; i < connection.peerPieces.length; i++) {
-      if (connection.peerPieces[i] != PieceStatus.downloaded) {
-        continue;
-      }
-
-      if (connection.torrentExchangeInfo.pieces[i] != PieceStatus.notDownloaded) {
-        continue;
-      }
-
-      targetPieceIndexes.add(i);
-    }
-    return targetPieceIndexes;
-  }
-
-  List<int> _selectPieceIndexes(TorrentExchangeInfo torrentExchangeInfo, List<int> targetPieceIndexes) {
-    /// todo
-    return targetPieceIndexes.sublist(0, 1);
-  }
-
-  String _computePiecePath(String name, int pieceIndex) {
-    return join(_downloadPath, '$name${CommonConstants.tempDirectorySuffix}', 'pieces', '$pieceIndex');
-  }
-
-  void _onPeerMessage(PeerConnection connection, PeerMessage message) {
-    assert(_torrentExchangeMap[connection.infoHash] != null);
-    assert(_torrentExchangeMap[connection.infoHash]!.peerConnectionMap[connection.peer] == connection);
-
-    for (PeerMessageHandler handler in _messageHandlers) {
-      if (handler.support(message)) {
-        return handler.handle(connection, message);
-      }
-    }
+    Timer.run(() {
+      _managePieceRequest(connection);
+    });
   }
 }

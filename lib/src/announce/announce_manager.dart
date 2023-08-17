@@ -9,7 +9,7 @@ import 'package:jtorrent/src/util/log_util.dart';
 
 import 'announce_request_options_provider.dart';
 
-class AnnounceManager with AnnounceManagerEventDispatcher{
+class AnnounceManager with AnnounceManagerEventDispatcher {
   AnnounceManager({required AnnounceConfigProvider announceConfigProvider}) : _announceConfigProvider = announceConfigProvider;
 
   AnnounceManager.fromTorrent({required Torrent torrent, required AnnounceConfigProvider announceConfigProvider})
@@ -43,7 +43,6 @@ class AnnounceManager with AnnounceManagerEventDispatcher{
     if (_running) {
       return;
     }
-
     _running = true;
     _startAllTrackers();
   }
@@ -112,6 +111,7 @@ class AnnounceManager with AnnounceManagerEventDispatcher{
       return;
     }
 
+    Log.fine('Announce to ${tracker.uri.toString()} with ${_announceConfigProvider.infoHash.toHexString} failed, reason: $error');
     _removeTracker(tracker);
   }
 
@@ -122,11 +122,11 @@ class AnnounceManager with AnnounceManagerEventDispatcher{
 
     if (response.success) {
       Log.fine(
-          'Announce to ${tracker.toString()} with ${_announceConfigProvider.infoHash.toHexString} success, result peer size : ${response.result!.peers.length}');
+          'Announce to ${tracker.uri.toString()} with ${_announceConfigProvider.infoHash.toHexString} success, result peer size : ${response.result!.peers.length}');
 
       _fireOnNewPeersFoundCallback(response.result!);
     } else {
-      Log.info('Announce to ${tracker.toString()} with ${_announceConfigProvider.infoHash.toHexString} failed, reason: ${response.failureReason}');
+      Log.info('Announce to ${tracker.uri.toString()} with ${_announceConfigProvider.infoHash.toHexString} failed, reason: ${response.failureReason}');
 
       _removeTracker(tracker);
     }
@@ -149,8 +149,8 @@ mixin AnnounceManagerEventDispatcher {
       Timer.run(() => callback(response));
     }
   }
-  
-  void dispose(){
+
+  void dispose() {
     _onNewPeersFoundCallbacks.clear();
   }
 }

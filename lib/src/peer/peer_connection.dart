@@ -7,17 +7,15 @@ import 'package:jtorrent/src/peer/peer_meesage.dart';
 import 'package:jtorrent/src/util/log_util.dart';
 
 import '../model/peer.dart';
-import '../model/torrent_exchange_info.dart';
 
 abstract class PeerConnection with PeerConnectionEventDispatcher {
   final Peer peer;
-  final Uint8List infoHash;
 
   bool connecting = false;
   bool connected = false;
+  bool illegal = false;
 
   DateTime? lastActiveTime;
-  bool illegal = false;
   bool haveHandshake = false;
   bool peerHaveHandshake = false;
   bool haveSentBitField = false;
@@ -27,13 +25,13 @@ abstract class PeerConnection with PeerConnectionEventDispatcher {
   bool peerChoking = true;
   bool peerInterested = false;
 
-  final List<bool> peerPieces;
+  final List<({int pieceIndex, int subPieceIndex})> pendingRequests = [];
 
-  PeerConnection({required this.peer, required this.infoHash, required int pieceCount}) : peerPieces = List.generate(pieceCount, (index) => false);
+  PeerConnection({required this.peer});
 
   Future<void> connect();
 
-  void sendHandShake();
+  void sendHandShake(Uint8List infoHash);
 
   void sendUnChoke();
 
@@ -47,7 +45,7 @@ abstract class PeerConnection with PeerConnectionEventDispatcher {
 }
 
 class TcpPeerConnection extends PeerConnection {
-  TcpPeerConnection({required super.peer, required super.infoHash, required super.pieceCount});
+  TcpPeerConnection({required super.peer});
 
   Socket? _socket;
 
@@ -71,7 +69,7 @@ class TcpPeerConnection extends PeerConnection {
       _socket = await Socket.connect(peer.ip, peer.port);
     } on Exception catch (e) {
       connecting = false;
-      _fireOnConnectFailedCallBack(e);
+      return _fireOnConnectFailedCallBack(e);
     }
 
     connected = true;
@@ -80,25 +78,22 @@ class TcpPeerConnection extends PeerConnection {
     _socket!.listen(
       (data) => _handleNewResponseData(data),
       onError: (Object error, StackTrace stackTrace) {
-        Log.fine('socket error while listen: $error');
-        close(illegal: true);
         _fireOnConnectInterruptedCallBack(error);
       },
       onDone: () {
-        Log.fine('socket done');
-        close();
         _fireOnDisconnectedCallBack();
       },
     );
   }
 
   @override
-  void sendHandShake() {
+  void sendHandShake(Uint8List infoHash) {
     assert(connected);
     assert(haveHandshake == false);
     assert(_socket != null);
 
     Log.finest('send handshake to ${peer.ip.address}:${peer.port}');
+
     _socket!.add(HandshakeMessage.noExtension(infoHash: infoHash).toUint8List);
   }
 
@@ -109,6 +104,7 @@ class TcpPeerConnection extends PeerConnection {
     assert(amChoking == true);
 
     Log.finest('send unChoke to ${peer.ip.address}:${peer.port}');
+
     _socket!.add(UnChokeMessage.instance.toUint8List);
   }
 
@@ -118,8 +114,10 @@ class TcpPeerConnection extends PeerConnection {
     assert(_socket != null);
     assert(peerChoking == false);
 
-    Log.finest(
-        'send request to ${peer.ip.address}:${peer.port} for piece $pieceIndex subPiece $subPieceIndex length: ${CommonConstants.subPieceLength}');
+    Log.finest('send request to ${peer.ip.address}:${peer.port} for piece: $pieceIndex subPieceIndex: $subPieceIndex}');
+
+    pendingRequests.add((subPieceIndex: subPieceIndex, pieceIndex: pieceIndex));
+
     _socket!.add(
         RequestMessage(index: pieceIndex, begin: subPieceIndex * CommonConstants.subPieceLength, length: CommonConstants.subPieceLength).toUint8List);
   }
@@ -146,8 +144,6 @@ class TcpPeerConnection extends PeerConnection {
 
   @override
   void close({bool illegal = false}) {
-    assert(connecting && connected);
-
     connecting = false;
     connected = false;
     this.illegal = illegal;
@@ -207,23 +203,9 @@ class TcpPeerConnection extends PeerConnection {
   }
 
   void _handleHandshakeMessage() {
-    if (_isInvalidHandshakeMessage()) {
-      return _fireOnIllegalMessageCallBack(IllegalMessage(message: 'Invalid handshake message'));
-    }
-
     List<int> segment = _buffer.sublist(0, 68);
     _buffer.removeRange(0, 68);
     _fireOnHandshakeMessageCallBack(HandshakeMessage.fromBuffer(segment));
-  }
-
-  bool _isInvalidHandshakeMessage() {
-    for (int i = 0; i < 20; i++) {
-      if (_buffer[i + 28] != infoHash[i]) {
-        return true;
-      }
-    }
-
-    return false;
   }
 
   bool _isOtherMessageHead() {
@@ -261,7 +243,6 @@ class TcpPeerConnection extends PeerConnection {
 
     int typeId = segment[4];
 
-    PeerMessage? peerMessage;
     switch (typeId) {
       case ChokeMessage.typeId:
         if (length != 1) {

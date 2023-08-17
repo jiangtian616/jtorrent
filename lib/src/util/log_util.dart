@@ -7,12 +7,12 @@ class Log {
       print(record);
     });
 
-  set level(Level level) {
+  static set level(Level level) {
     _logger.level = level;
   }
 
   static void finest(Object? message, [Object? error, StackTrace? stackTrace]) => _logger.log(Level.FINEST, message, error, stackTrace);
-  
+
   static void fine(Object? message, [Object? error, StackTrace? stackTrace]) => _logger.log(Level.FINE, message, error, stackTrace);
 
   static void info(Object? message, [Object? error, StackTrace? stackTrace]) => _logger.log(Level.INFO, message, error, stackTrace);
