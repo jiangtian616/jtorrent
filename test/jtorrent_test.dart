@@ -7,17 +7,16 @@ import 'package:logging/logging.dart';
 import 'package:test/test.dart';
 
 void main() {
-  setUpAll(() {
-    hierarchicalLoggingEnabled = true;
-    Log.level = Level.FINEST;
-  });
-
   group(
     'download',
     () {
+      hierarchicalLoggingEnabled = true;
+      Log.level = Level.FINE;
+
       test('manga', () async {
         Torrent torrent = Torrent.fromFileSync(File('/Users/JTMonster/IdeaProjects/jtorrent/test/torrent/manga.torrent'));
-        TorrentTask torrentTask = TorrentTask.fromTorrent(torrent, 'C:\\Users\\JTMonster\\IdeaProjects\\jtorrent\\test\\torrent');
+        // TorrentTask torrentTask = TorrentTask.fromTorrent(torrent, 'C:\\Users\\JTMonster\\IdeaProjects\\jtorrent\\test\\torrent');
+        TorrentTask torrentTask = TorrentTask.fromTorrent(torrent, '/Users/JTMonster/IdeaProjects/jtorrent/test/torrent');
         torrentTask.start();
         await Future.delayed(Duration(minutes: 10));
       });

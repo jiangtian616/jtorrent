@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
@@ -74,6 +73,9 @@ class PeerManager {
     connection.addOnRequestMessageCallBack((message) => _processRequestMessage(connection, message));
     connection.addOnPieceMessageCallBack((message) => _processPieceMessage(connection, message));
     connection.addOnCancelMessageCallBack((message) => _processCancelMessage(connection, message));
+
+    connection.addOnRequestTimeoutCallBack(
+        ({required int pieceIndex, required int subPieceIndex}) => _processRequestTimeout(connection, pieceIndex, subPieceIndex));
   }
 
   void _unHookPeerConnection(PeerConnection connection) {
@@ -99,25 +101,25 @@ class PeerManager {
   void _processConnected(PeerConnection connection) {
     assert(connection.haveHandshake == false);
 
-    Log.finest('Connected to ${connection.peer.ip.address}:${connection.peer.port}');
+    Log.fine('Connected to ${connection.peer.ip.address}:${connection.peer.port}');
 
     _sendHandshake(connection);
   }
 
   void _processConnectFailed(PeerConnection connection, dynamic error) {
     Log.finest('Connect to ${connection.peer.ip.address}:${connection.peer.port} failed, error: $error');
-
-    connection.close();
   }
 
   void _processConnectInterrupted(PeerConnection connection, dynamic error) {
-    Log.finest('Connect to ${connection.peer.ip.address}:${connection.peer.port} interrupted, error: $error');
+    Log.fine('Connect to ${connection.peer.ip.address}:${connection.peer.port} interrupted, error: $error');
 
-    connection.close();
+    _resetConnectionPendingRequest(connection);
   }
 
   void _processDisconnected(PeerConnection connection) {
-    connection.close();
+    Log.fine('Disconnected from ${connection.peer.ip.address}:${connection.peer.port}');
+
+    _resetConnectionPendingRequest(connection);
   }
 
   void _processIllegalMessage(PeerConnection connection, IllegalMessage message) {
@@ -154,13 +156,13 @@ class PeerManager {
   }
 
   void _processChokeMessage(PeerConnection connection, ChokeMessage message) {
-    Log.finest('Receive choke message from ${connection.peer.ip.address}:${connection.peer.port}');
+    Log.fine('Receive choke message from ${connection.peer.ip.address}:${connection.peer.port}');
 
     connection.peerChoking = true;
   }
 
   void _processUnChokeMessage(PeerConnection connection, UnChokeMessage message) {
-    Log.finest('Receive unchoke message from ${connection.peer.ip.address}:${connection.peer.port}');
+    Log.fine('Receive unchoke message from ${connection.peer.ip.address}:${connection.peer.port}');
 
     connection.peerChoking = false;
     _managePieceRequest(connection);
@@ -191,9 +193,9 @@ class PeerManager {
   }
 
   void _processBitfieldMessage(PeerConnection connection, BitFieldMessage message) {
-    Log.finest(
+    Log.fine(
         'Receive bitfield message from ${connection.peer.ip.address}:${connection.peer.port}, composed: ${message.composed}, bitfield: ${message.bitField}');
-    
+
     for (int i = 0; i < message.bitField.length; i++) {
       int byte = message.bitField[i];
 
@@ -219,13 +221,13 @@ class PeerManager {
   }
 
   void _processRequestMessage(PeerConnection connection, RequestMessage message) {
-    Log.finest(
+    Log.fine(
         'Receive request message from ${connection.peer.ip.address}:${connection.peer.port}, index: ${message.index}, begin: ${message.begin}, length: ${message.length}');
   }
 
   void _processPieceMessage(PeerConnection connection, PieceMessage message) {
-    Log.finest(
-        'Receive piece message from ${connection.peer.ip.address}:${connection.peer.port}, index: ${message.index}, begin: ${message.begin}, length: ${message.block.length}');
+    Log.fine(
+        'Receive piece message from ${connection.peer.ip.address}:${connection.peer.port}, index: ${message.index}, subIndex: ${message.begin ~/ CommonConstants.subPieceLength}, length: ${message.block.length}');
 
     if (message.index >= _pieceManager.pieceCount) {
       Log.severe('PieceMessage pieceIndex ${message.index} >= pieces.length ${_pieceManager.pieceCount}');
@@ -249,6 +251,8 @@ class PeerManager {
       return connection.close(illegal: true);
     }
 
+    connection.pendingRequests.remove((pieceIndex: message.index, subPieceIndex: subPieceIndex));
+
     if (_pieceManager.pieceCompleted(message.index)) {
       Log.fine('Piece ${message.index} already downloaded of ${_infoHash.toHexString}');
       return;
@@ -267,6 +271,12 @@ class PeerManager {
         _managePieceRequest(connection);
       }
     });
+  }
+
+  void _processRequestTimeout(PeerConnection connection, int pieceIndex, int subPieceIndex) {
+    Log.fine('Request ${connection.peer.ip.address}:${connection.peer.port} timeout, pieceIndex: $pieceIndex, subPieceIndex: $subPieceIndex');
+    
+    _pieceManager.updateLocalSubPiece(pieceIndex, subPieceIndex, PieceStatus.none);
   }
 
   Future<void> _checkAllSubPiecesDownloaded(PeerConnection connection, int pieceIndex) async {
@@ -351,10 +361,17 @@ class PeerManager {
 
     _pieceManager.updateLocalSubPiece(targetPieceIndex, targetSubPieceIndex, PieceStatus.downloading);
 
-    connection.sendRequest(targetPieceIndex, targetSubPieceIndex);
+    if (connection.sendRequest(targetPieceIndex, targetSubPieceIndex)) {
+      Timer.run(() {
+        _managePieceRequest(connection);
+      });
+    }
+  }
 
-    Timer.run(() {
-      _managePieceRequest(connection);
-    });
+  void _resetConnectionPendingRequest(PeerConnection connection) {
+    List<({int pieceIndex, int subPieceIndex})> requests = connection.clearPendingRequests();
+    for (({int pieceIndex, int subPieceIndex}) request in requests) {
+      _pieceManager.resetLocalSubPieces(request.pieceIndex, request.subPieceIndex);
+    }
   }
 }

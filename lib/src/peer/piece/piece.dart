@@ -19,7 +19,7 @@ class Piece {
     required this.pieceLength,
     required int subPieceLength,
   })  : assert(pieceLength % subPieceLength == 0),
-        subPieces = List.generate(pieceLength ~/ subPieceLength, (index) => PieceStatus.notDownloaded);
+        subPieces = List.generate(pieceLength ~/ subPieceLength, (index) => PieceStatus.none);
 
   void updateSubPiece(int subPieceIndex, PieceStatus status) {
     assert(subPieceIndex >= 0 && subPieceIndex < subPiecesCount);

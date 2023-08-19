@@ -60,13 +60,22 @@ class PieceManager {
 
     _localPieces[index].updateSubPiece(subPieceIndex, status);
   }
+  
+  void resetLocalSubPieces(int index, int subPieceIndex) {
+    assert(index >= 0 && index < pieceCount);
+    assert(subPieceIndex >= 0 && subPieceIndex < subPieceCount);
+
+    if (_localPieces[index].subPieces[subPieceIndex] == PieceStatus.downloading) {
+      _localPieces[index].updateSubPiece(subPieceIndex, PieceStatus.none);
+    }
+  }
 
   int? selectPieceIndexToDownload(Peer peer) {
     assert(_peerPieces[peer] != null);
 
     /// todo
     for (int i = 0; i < _peerPieces[peer]!.length; i++) {
-      if (_peerPieces[peer]![i] && !_localPieces[i].completed) {
+      if (_peerPieces[peer]![i] && !_localPieces[i].completed && _localPieces[i].subPieces.any((subPiece) => subPiece == PieceStatus.none)) {
         return i;
       }
     }
@@ -79,7 +88,7 @@ class PieceManager {
 
     /// todo
     for (int i = 0; i < _localPieces[pieceIndex].subPiecesCount; i++) {
-      if (_localPieces[pieceIndex].subPieces[i] == PieceStatus.notDownloaded) {
+      if (_localPieces[pieceIndex].subPieces[i] == PieceStatus.none) {
         return i;
       }
     }
@@ -95,4 +104,4 @@ class PieceManager {
   }
 }
 
-enum PieceStatus { notDownloaded, downloading, downloaded }
+enum PieceStatus { none, downloading, downloaded }
