@@ -13,7 +13,7 @@ class CommonUtil {
     String prefix = CommonConstants.peerIdPrefix;
 
     Random random = Random(infoHash.hashCode);
-    List<int> suffix = List.generate(CommonConstants.peerIdLength - prefix.length, (index) => random.nextInt(2 << 7 - 1));
+    List<int> suffix = List.generate(CommonConstants.peerIdLength - prefix.length, (index) => random.nextInt(1 << 8));
 
     return Uint8List.fromList(utf8.encode(prefix) + suffix);
   }
