@@ -31,4 +31,35 @@ class CommonUtil {
 
     return bitmap;
   }
+
+  static bool getValueFromBitmap(Uint8List bitmap, int index) {
+    assert(index >= 0 && index < bitmap.length * 8);
+
+    return bitmap[index ~/ 8] & (1 << (7 - index % 8)) != 0;
+  }
+
+  static void setValueToBitmap(Uint8List bitmap, int index, bool value) {
+    assert(index >= 0 && index < bitmap.length * 8);
+
+    if (value) {
+      bitmap[index ~/ 8] |= 1 << (7 - index % 8);
+    } else {
+      bitmap[index ~/ 8] &= ~(1 << (7 - index % 8));
+    }
+  }
+
+  static int getBitCountFromBitmap(Uint8List bitmap) {
+    int count = 0;
+
+    for (int value in bitmap) {
+      while (value != 0) {
+        if (value & 1 == 1) {
+          count++;
+        }
+        value >>= 1;
+      }
+    }
+
+    return count;
+  }
 }

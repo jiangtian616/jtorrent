@@ -159,10 +159,10 @@ class HaveMessage implements PeerMessage {
   static const int typeId = 4;
   final int pieceIndex;
 
-  const HaveMessage._({required this.pieceIndex});
+  const HaveMessage({required this.pieceIndex});
 
   factory HaveMessage.fromBuffer(List<int> buffer) {
-    return HaveMessage._(pieceIndex: ByteData.view(Uint8List.fromList(buffer).buffer, 5, 4).getInt32(0));
+    return HaveMessage(pieceIndex: ByteData.view(Uint8List.fromList(buffer).buffer, 5, 4).getInt32(0));
   }
 
   @override
@@ -178,7 +178,7 @@ class HaveMessage implements PeerMessage {
 class ComposedHaveMessage extends HaveMessage {
   final List<int> pieceIndexes;
 
-  const ComposedHaveMessage._({required this.pieceIndexes}) : super._(pieceIndex: 0);
+  const ComposedHaveMessage._({required this.pieceIndexes}) : super(pieceIndex: 0);
 
   factory ComposedHaveMessage.composed(List<HaveMessage> haveMessages) {
     return ComposedHaveMessage._(pieceIndexes: haveMessages.map((m) => m.pieceIndex).toList());
@@ -201,8 +201,8 @@ class BitFieldMessage implements PeerMessage {
 
   BitFieldMessage({required this.composed, required this.bitField});
 
-  factory BitFieldMessage.fromBoolList(List<bool> pieces) {
-    return BitFieldMessage(composed: false, bitField: CommonUtil.boolListToBitmap(pieces));
+  factory BitFieldMessage.fromBitField(Uint8List bitField) {
+    return BitFieldMessage(composed: false, bitField: bitField);
   }
 
   factory BitFieldMessage.fromBuffer(List<int> buffer) {
@@ -332,10 +332,10 @@ class CancelMessage implements PeerMessage {
   final int begin;
   final int length;
 
-  const CancelMessage._({required this.index, required this.begin, required this.length});
+  const CancelMessage({required this.index, required this.begin, required this.length});
 
   factory CancelMessage.fromBuffer(List<int> buffer) {
-    return CancelMessage._(
+    return CancelMessage(
       index: buffer[5],
       begin: buffer[6],
       length: buffer[7],

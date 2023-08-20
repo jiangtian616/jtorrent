@@ -5,7 +5,7 @@ class CommonConstants {
 
   static const int subPieceLength = 1 << 14;
 
-  static const String metadataFileName = 'metadata.jtorrent';
-  static const String tempDownloadFileSuffix = '.jtorrent';
+  static const String stateFileSuffix = '.jt.state';
+  static const String tempDownloadFileSuffix = '.jt';
   static const String tempDirectorySuffix = '.temp';
 }

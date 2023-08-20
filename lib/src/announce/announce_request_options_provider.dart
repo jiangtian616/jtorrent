@@ -33,8 +33,8 @@ abstract interface class AnnounceConfigProvider {
   int get left;
 
   /// Request timeout, default is 10 seconds
-  Duration get connectTimeout;
+  Duration get announceConnectTimeout;
 
   /// Request timeout, default is 30 seconds
-  Duration get receiveTimeout;
+  Duration get announceReceiveTimeout;
 }

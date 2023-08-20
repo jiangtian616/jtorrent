@@ -42,6 +42,8 @@ class Torrent {
       .map((charCodes) => charCodes.map((char) => char.toRadixString(16)).map((char) => char.length == 2 ? char : '0$char').toList().join())
       .toList();
 
+  int get totalBytes => files.map((file) => file.length).reduce((value, element) => value + element);
+
   const Torrent({
     required this.trackers,
     required this.pieceLength,

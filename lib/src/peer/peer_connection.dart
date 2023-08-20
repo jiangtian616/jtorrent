@@ -9,9 +9,9 @@ import 'package:jtorrent/src/util/log_util.dart';
 import '../model/peer.dart';
 
 abstract class PeerConnection with PeerConnectionEventDispatcher {
-  static const int maxPendingRequests = 5;
+  static const int maxPendingRequests = 6;
   static const Duration maxIdleTime = Duration(minutes: 2);
-  static const Duration requestTimeout = Duration(seconds: 10);
+  static const Duration requestTimeout = Duration(seconds: 20);
 
   final Peer peer;
 
@@ -23,50 +23,91 @@ abstract class PeerConnection with PeerConnectionEventDispatcher {
   bool haveHandshake = false;
   bool peerHaveHandshake = false;
   bool haveSentBitField = false;
+  bool peerHaveSentBitField = false;
+  int timeoutTimes = 0;
 
   bool amChoking = true;
   bool amInterested = false;
   bool peerChoking = true;
   bool peerInterested = false;
 
-  final Map<({int pieceIndex, int subPieceIndex}), Timer> pendingRequests = {};
+  final Map<({int pieceIndex, int subPieceIndex}), ({int length, Timer timer})> pendingRequests = {};
 
   Timer? _keepAliveTimer;
+  Timer? _peerKeepAliveTimer;
 
   PeerConnection({required this.peer});
 
   Future<void> connect();
 
+  void close({bool illegal = false});
+
   void sendHandShake(Uint8List infoHash);
+
+  void sendKeepAlive();
 
   void sendUnChoke();
 
-  bool sendRequest(int pieceIndex, int subPieceIndex);
-
   void sendInterested();
 
-  void sendBitField(List<bool> pieces);
+  bool sendRequest(int pieceIndex, int subPieceIndex, int length);
 
-  void close({bool illegal = false});
+  void sendCancel(int pieceIndex, int subPieceIndex, int length);
+
+  void sendBitField(Uint8List bitField);
+
+  void sendHaveMessage(int pieceIndex);
+
+  List<({int pieceIndex, int subPieceIndex})> clearPendingRequests() {
+    for (var entry in pendingRequests.entries) {
+      entry.value.timer.cancel();
+      sendCancel(entry.key.pieceIndex, entry.key.subPieceIndex, entry.value.length);
+    }
+
+    List<({int pieceIndex, int subPieceIndex})> requests = pendingRequests.keys.toList();
+    pendingRequests.clear();
+    return requests;
+  }
+
+  bool completePendingRequest(int pieceIndex, int subPieceIndex) {
+    ({int length, Timer timer})? value = pendingRequests.remove((pieceIndex: pieceIndex, subPieceIndex: subPieceIndex));
+    if (value != null) {
+      value.timer.cancel();
+      return true;
+    }
+    return false;
+  }
+
+  bool cancelPendingRequest(int pieceIndex, int subPieceIndex) {
+    ({int length, Timer timer})? value = pendingRequests.remove((pieceIndex: pieceIndex, subPieceIndex: subPieceIndex));
+    if (value != null) {
+      value.timer.cancel();
+      sendCancel(pieceIndex, subPieceIndex, value.length);
+      return true;
+    }
+    return false;
+  }
+
+  void resetTimeoutTimes() {
+    timeoutTimes = 0;
+  }
 
   void _countDownKeepAliveTimer() {
-    _keepAliveTimer?.cancel();
-    _keepAliveTimer = Timer(maxIdleTime, () {
+    _peerKeepAliveTimer?.cancel();
+    _peerKeepAliveTimer = Timer(maxIdleTime, () {
+      sendKeepAlive();
+    });
+  }
+
+  void _countDownPeerKeepAliveTimer() {
+    _peerKeepAliveTimer?.cancel();
+    _peerKeepAliveTimer = Timer(maxIdleTime, () {
       Log.fine('Peer $peer is idle for $maxIdleTime, closing connection');
       close();
     });
   }
 
-  List<({int pieceIndex, int subPieceIndex})> clearPendingRequests() {
-    List<({int pieceIndex, int subPieceIndex})> requests = pendingRequests.keys.toList();
-    for (var timer in pendingRequests.values) {
-      timer.cancel();
-    }
-    pendingRequests.clear();
-    return requests;
-  }
-
-  bool _addRequest(int pieceIndex, int subPieceIndex) {
+  bool _addRequest(int pieceIndex, int subPieceIndex, int length) {
     if (pendingRequests[(subPieceIndex: subPieceIndex, pieceIndex: pieceIndex)] != null) {
       return true;
     }
@@ -74,12 +115,15 @@ abstract class PeerConnection with PeerConnectionEventDispatcher {
       return false;
     }
 
-    pendingRequests[(subPieceIndex: subPieceIndex, pieceIndex: pieceIndex)] = Timer(PeerConnection.requestTimeout, () {
-      bool success = pendingRequests.remove((subPieceIndex: subPieceIndex, pieceIndex: pieceIndex)) != null;
-      if (success) {
-        _fireOnRequestTimeoutCallBack(subPieceIndex: subPieceIndex, pieceIndex: pieceIndex);
-      }
-    });
+    pendingRequests[(pieceIndex: pieceIndex, subPieceIndex: subPieceIndex)] = (
+      length: length,
+      timer: Timer(PeerConnection.requestTimeout, () {
+        bool success = pendingRequests.remove((pieceIndex: pieceIndex, subPieceIndex: subPieceIndex)) != null;
+        if (success) {
+          _fireOnRequestTimeoutCallBack(pieceIndex, subPieceIndex);
+        }
+      }),
+    );
 
     return true;
   }
@@ -127,65 +171,90 @@ class TcpPeerConnection extends PeerConnection {
         _fireOnDisconnectedCallBack();
       },
     );
+
+    _countDownKeepAliveTimer();
   }
 
   @override
   void sendHandShake(Uint8List infoHash) {
-    assert(connected);
     assert(haveHandshake == false);
     assert(_socket != null);
 
     Log.finest('send handshake to ${peer.ip.address}:${peer.port}');
 
-    _socket!.add(HandshakeMessage.noExtension(infoHash: infoHash).toUint8List);
+    _sendMessage(HandshakeMessage.noExtension(infoHash: infoHash));
   }
 
   @override
+  void sendKeepAlive() {
+    assert(_socket != null);
+
+    Log.finest('send keep alive to ${peer.ip.address}:${peer.port}');
+
+    _sendMessage(KeepAliveMessage.instance);
+  }
+  
+  @override
   void sendUnChoke() {
-    assert(connected);
     assert(_socket != null);
     assert(amChoking == true);
 
     Log.finest('send unChoke to ${peer.ip.address}:${peer.port}');
 
-    _socket!.add(UnChokeMessage.instance.toUint8List);
-  }
-
-  @override
-  bool sendRequest(int pieceIndex, int subPieceIndex) {
-    assert(connected);
-    assert(_socket != null);
-    assert(peerChoking == false);
-
-    if (!_addRequest(pieceIndex, subPieceIndex)) {
-      return false;
-    }
-
-    Log.fine('send request to ${peer.ip.address}:${peer.port} for piece: $pieceIndex subPieceIndex: $subPieceIndex');
-
-    _socket!.add(
-        RequestMessage(index: pieceIndex, begin: subPieceIndex * CommonConstants.subPieceLength, length: CommonConstants.subPieceLength).toUint8List);
-    return true;
+    _sendMessage(UnChokeMessage.instance);
   }
 
   @override
   void sendInterested() {
-    assert(connected);
     assert(_socket != null);
     assert(amInterested == false);
 
     Log.finest('send interested to ${peer.ip.address}:${peer.port}');
-    _socket!.add(InterestedMessage.instance.toUint8List);
+
+    _sendMessage(InterestedMessage.instance);
   }
 
   @override
-  void sendBitField(List<bool> pieces) {
-    assert(connected);
+  bool sendRequest(int pieceIndex, int subPieceIndex, int length) {
+    assert(_socket != null);
+    assert(peerChoking == false);
+
+    if (!_addRequest(pieceIndex, subPieceIndex, length)) {
+      return false;
+    }
+
+    Log.finest('send request to ${peer.ip.address}:${peer.port} for piece: $pieceIndex subPieceIndex: $subPieceIndex length: $length');
+
+    _sendMessage(RequestMessage(index: pieceIndex, begin: subPieceIndex * CommonConstants.subPieceLength, length: length));
+    return true;
+  }
+
+  @override
+  void sendCancel(int pieceIndex, int subPieceIndex, int length) {
+    assert(_socket != null);
+
+    Log.fine('send cancel to ${peer.ip.address}:${peer.port} for piece: $pieceIndex subPieceIndex: $subPieceIndex length: $length');
+
+    _sendMessage(CancelMessage(index: pieceIndex, begin: subPieceIndex * CommonConstants.subPieceLength, length: length));
+  }
+
+  @override
+  void sendBitField(Uint8List bitField) {
     assert(_socket != null);
     assert(haveSentBitField == false);
 
-    Log.fine('send bitfield to ${peer.ip.address}:${peer.port} with bitfield: ${BitFieldMessage.fromBoolList(pieces).bitField}');
-    _socket!.add(BitFieldMessage.fromBoolList(pieces).toUint8List);
+    Log.finest('send bitfield to ${peer.ip.address}:${peer.port} with bitfield: $bitField');
+
+    _sendMessage(BitFieldMessage.fromBitField(bitField));
+  }
+
+  @override
+  void sendHaveMessage(int pieceIndex) {
+    assert(_socket != null);
+
+    Log.finest('send have message to ${peer.ip.address}:${peer.port} for piece: $pieceIndex');
+
+    _sendMessage(HaveMessage(pieceIndex: pieceIndex));
   }
 
   @override
@@ -198,8 +267,23 @@ class TcpPeerConnection extends PeerConnection {
     _buffer.clear();
   }
 
+  void _sendMessage(PeerMessage message) {
+    if (!connected) {
+      return;
+    }
+
+    assert(_socket != null);
+    try {
+      _socket!.add(message.toUint8List);
+    } on Object catch (e) {
+      _fireOnSendMessageFailedCallBack(e);
+    }
+    
+    _countDownKeepAliveTimer();
+  }
+
   void _handleNewResponseData(Uint8List response) {
-    super._countDownKeepAliveTimer();
+    super._countDownPeerKeepAliveTimer();
 
     _buffer.addAll(response);
     if (_buffer.isEmpty) {
@@ -387,6 +471,7 @@ mixin PeerConnectionEventDispatcher {
   final Set<void Function(dynamic)> _onConnectFailedCallBacks = {};
   final Set<void Function(dynamic)> _onConnectInterruptedCallBacks = {};
   final Set<void Function()> _onDisconnectedCallBacks = {};
+  final Set<void Function(dynamic)> _onSendMessageFailedCallBacks = {};
 
   final Set<void Function(IllegalMessage)> _onIllegalMessageCallBacks = {};
   final Set<void Function(HandshakeMessage)> _onHandshakeMessageCallBacks = {};
@@ -401,7 +486,7 @@ mixin PeerConnectionEventDispatcher {
   final Set<void Function(PieceMessage)> _onPieceMessageCallBacks = {};
   final Set<void Function(CancelMessage)> _onCancelMessageCallBacks = {};
 
-  final Set<void Function({required int pieceIndex,required int subPieceIndex})> _onRequestTimeoutCallBacks = {};
+  final Set<void Function(int pieceIndex, int subPieceIndex)> _onRequestTimeoutCallBacks = {};
 
   void addOnConnectedCallBack(void Function() callback) => _onConnectedCallBacks.add(callback);
 
@@ -447,6 +532,18 @@ mixin PeerConnectionEventDispatcher {
     for (var callback in _onDisconnectedCallBacks) {
       Timer.run(() {
         callback();
+      });
+    }
+  }
+
+  void addOnSendMessageFailedCallBack(void Function(dynamic) callback) => _onSendMessageFailedCallBacks.add(callback);
+
+  bool removeOnSendMessageFailedCallBack(void Function(dynamic) callback) => _onSendMessageFailedCallBacks.remove(callback);
+
+  void _fireOnSendMessageFailedCallBack(dynamic error) {
+    for (var callback in _onSendMessageFailedCallBacks) {
+      Timer.run(() {
+        callback(error);
       });
     }
   }
@@ -541,9 +638,7 @@ mixin PeerConnectionEventDispatcher {
 
   void _fireOnComposedHaveMessageCallBack(ComposedHaveMessage message) {
     for (var callback in _onComposedHaveMessageCallBacks) {
-      Timer.run(() {
-        callback(message);
-      });
+      callback(message);
     }
   }
 
@@ -553,9 +648,7 @@ mixin PeerConnectionEventDispatcher {
 
   void _fireOnBitFieldMessageCallBack(BitFieldMessage message) {
     for (var callback in _onBitFieldMessageCallBacks) {
-      Timer.run(() {
-        callback(message);
-      });
+      callback(message);
     }
   }
 
@@ -595,14 +688,14 @@ mixin PeerConnectionEventDispatcher {
     }
   }
 
-  void addOnRequestTimeoutCallBack(void Function({required int pieceIndex,required int subPieceIndex}) callback) => _onRequestTimeoutCallBacks.add(callback);
+  void addOnRequestTimeoutCallBack(void Function(int pieceIndex, int subPieceIndex) callback) => _onRequestTimeoutCallBacks.add(callback);
 
-  bool removeOnRequestTimeoutCallBack(void Function({int pieceIndex, int subPieceIndex}) callback) => _onRequestTimeoutCallBacks.remove(callback);
+  bool removeOnRequestTimeoutCallBack(void Function(int pieceIndex, int subPieceIndex) callback) => _onRequestTimeoutCallBacks.remove(callback);
 
-  void _fireOnRequestTimeoutCallBack({required int pieceIndex, required int subPieceIndex}) {
+  void _fireOnRequestTimeoutCallBack(int pieceIndex, int subPieceIndex) {
     for (var callback in _onRequestTimeoutCallBacks) {
       Timer.run(() {
-        callback(pieceIndex: pieceIndex, subPieceIndex: subPieceIndex);
+        callback(pieceIndex, subPieceIndex);
       });
     }
   }

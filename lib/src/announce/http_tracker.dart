@@ -59,8 +59,8 @@ class HttpTracker extends Tracker {
     _httpClient ??= HttpClient();
     _request?.abort();
 
-    _request = await _httpClient!.getUrl(announceWithQueryParams).timeout(super.announceConfigProvider.connectTimeout);
-    HttpClientResponse response = await _request!.close().timeout(super.announceConfigProvider.receiveTimeout);
+    _request = await _httpClient!.getUrl(announceWithQueryParams).timeout(super.announceConfigProvider.announceConnectTimeout);
+    HttpClientResponse response = await _request!.close().timeout(super.announceConfigProvider.announceReceiveTimeout);
 
     List<int> rawBody =
         await response.toList().then((segments) => segments.fold<List<int>>([], (previousValue, element) => previousValue..addAll(element)));
