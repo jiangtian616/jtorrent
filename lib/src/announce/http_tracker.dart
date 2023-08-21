@@ -156,7 +156,7 @@ class HttpTracker extends Tracker {
     Set<Peer> peerSet = {};
     for (int i = 0; i < peers6.length; i += 18) {
       InternetAddress ip = InternetAddress.fromRawAddress(peers6.sublist(i, i + 16), type: InternetAddressType.IPv6);
-      int port = peers6[i + 16] * (1 << 8) + peers6[i + 17];
+      int port = peers6[i + 16] << 8 + peers6[i + 17];
       peerSet.add(Peer(ip: ip, port: port));
     }
 

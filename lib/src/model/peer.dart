@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 class Peer {
   /// A string of length 20 in bytes, correspond to peer_id in request. Null in compact mode
@@ -11,6 +12,33 @@ class Peer {
   final int port;
 
   const Peer({this.peerId, required this.ip, required this.port});
+
+  static Uint8List toCompactList(List<Peer> peers) {
+    List<int> list = [];
+
+    for (var i = 0; i < peers.length; i++) {
+      final peer = peers[i];
+      list.addAll(peer.ip.rawAddress);
+      list.addAll([peer.port ~/ 256, peer.port % 256]);
+    }
+
+    return Uint8List.fromList(list);
+  }
+
+  static List<Peer> parseCompactList(Uint8List? body) {
+    if (body == null) {
+      return [];
+    }
+
+    List<Peer> peers = [];
+    for (var i = 0; i < body.length; i += 6) {
+      final ip = InternetAddress.fromRawAddress(body.sublist(i, i + 4));
+      final port = body[i + 4] >> 8 + body[i + 5];
+      peers.add(Peer(ip: ip, port: port));
+    }
+
+    return peers;
+  }
 
   @override
   String toString() {

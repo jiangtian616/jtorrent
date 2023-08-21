@@ -1,19 +1,19 @@
-import 'dart:io';
-
+import 'package:jtorrent/src/dht/struct/node.dart';
 import 'package:jtorrent/src/dht/struct/tree_node.dart';
 import 'package:jtorrent/src/exception/dht_exception.dart';
 
-import 'dht_node.dart';
 import 'node_id.dart';
 
-class Bucket extends TreeNode {
-  static const maxBucketSize = 8;
+class Bucket<T extends AbstractNode> extends TreeNode {
+  static const int maxBucketSize = 8;
 
-  final Set<DHTNode> _nodes = {};
+  final Set<T> _nodes = {};
 
   final NodeId rangeBegin;
 
   final NodeId rangeEnd;
+
+  int get size => _nodes.length;
 
   Bucket({required this.rangeBegin, required this.rangeEnd});
 
@@ -32,7 +32,7 @@ class Bucket extends TreeNode {
     return true;
   }
 
-  bool canAddNode(DHTNode node) {
+  bool canAddNode(T node) {
     assert(node.bucket == null);
 
     if (node.id < rangeBegin || node.id > rangeEnd) {
@@ -58,7 +58,7 @@ class Bucket extends TreeNode {
     }
   }
 
-  bool addNode(DHTNode node) {
+  bool addNode(T node) {
     assert(node.bucket == null);
 
     if (node.id < rangeBegin || node.id > rangeEnd) {
@@ -99,10 +99,14 @@ class Bucket extends TreeNode {
 
     NodeId middle = NodeId.middleNodeId(rangeBegin, rangeEnd);
 
+    if (middle == rangeBegin || middle == rangeEnd) {
+      throw DHTException('Bucket is too small to split');
+    }
+
     leftChild = Bucket(rangeBegin: rangeBegin, rangeEnd: middle);
     rightChild = Bucket(rangeBegin: middle, rangeEnd: rangeEnd);
 
-    for (DHTNode node in _nodes) {
+    for (T node in _nodes) {
       if (node.id < middle) {
         leftBucket!.addNode(node);
       } else {
@@ -111,13 +115,15 @@ class Bucket extends TreeNode {
     }
   }
 
-  bool containNodeAddress(InternetAddress ip, int port) {
-    for (DHTNode node in _nodes) {
-      if (node.address == ip && node.port == port) {
-        return true;
-      }
-    }
+  bool contains(bool Function(T node) test) {
+    return _nodes.any(test);
+  }
 
-    return false;
+  bool containsNode(T node) {
+    return _nodes.contains(node);
+  }
+
+  T? getNode(T node) {
+    return _nodes.lookup(node);
   }
 }
