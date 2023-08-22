@@ -11,6 +11,7 @@ import 'package:jtorrent/src/dht/dht_node.dart';
 import 'package:jtorrent/src/dht/struct/node_distance.dart';
 import 'package:jtorrent/src/dht/struct/node_id.dart';
 import 'package:jtorrent/src/exception/dht_exception.dart';
+import 'package:jtorrent/src/extension/uint8_list_extension.dart';
 import 'package:jtorrent/src/util/log_util.dart';
 import 'package:jtorrent_bencoding/jtorrent_bencoding.dart';
 
@@ -18,58 +19,103 @@ import '../constant/common_constants.dart';
 import '../model/peer.dart';
 import 'struct/bucket.dart';
 
-class DHTManager with DHTManagerEventDispatcher {
+abstract class DHTManager {
   Duration queryTimeout = Duration(seconds: 15);
 
   static const Duration nodeRefreshPeriod = Duration(minutes: 15);
   static const Duration tokenExpireTime = Duration(minutes: 10);
 
-  bool _initialized = false;
-  bool connected = false;
-  bool paused = false;
-  bool _disposed = false;
+  final Set<String> _neededInfoHashes = {};
 
-  final Set<Uint8List> _neededInfoHashes = {};
-  final Map<Uint8List, List<Peer>> _infoHashTable = {};
+  bool _disposed = false;
+  bool _paused = false;
+
+  DHTManager._();
+
+  factory DHTManager() {
+    return _DHTManager();
+  }
+
+  Future<int> start();
+
+  void pause() {
+    if (_disposed) {
+      throw DHTException('DHTManager has been disposed');
+    }
+
+    if (_paused) {
+      return;
+    }
+    _paused = true;
+  }
+
+  void resume() {
+    if (_disposed) {
+      throw DHTException('DHTManager has been disposed');
+    }
+
+    if (!_paused) {
+      return;
+    }
+    _paused = false;
+  }
+
+  void dispose();
+
+  bool addNeededInfoHash(Uint8List infoHash) {
+    return _neededInfoHashes.add(infoHash.toHexString);
+  }
+
+  bool removeNeededInfoHash(Uint8List infoHash) {
+    return _neededInfoHashes.remove(infoHash.toHexString);
+  }
+
+  Future<void> tryAddNodeAddress(InternetAddress ip, int port);
+
+  void printDebugInfo();
+}
+
+class _DHTManager extends DHTManager with DHTManagerEventDispatcher {
+  bool _initialized = false;
+  bool _connected = false;
+
+  final Completer<int> _initCompleter = Completer<int>();
+
+  final Map<String, List<Peer>> _infoHashTable = {};
 
   final Bucket<DHTNode> _root = Bucket(rangeBegin: NodeId.min, rangeEnd: NodeId.max);
-
   late final DHTNode _selfNode;
 
-  final Set<DHTNode> _discardNodes = {};
-
   RawDatagramSocket? _socket;
+  final Completer<void> _socketCompleter = Completer<void>();
 
-  final Map<Uint8List, ({QueryMessage message, Timer timer})> _pendingRequests = {};
-
+  final Map<String, ({QueryMessage message, Timer timer})> _pendingTransactions = {};
   final Map<DHTNode, Timer> _refreshTimer = {};
-
   final Map<({InternetAddress ip, int port}), ({Uint8List token, Timer timer})> _tokenTimer = {};
 
-  Future<void> start() async {
+  _DHTManager() : super._();
+
+  @override
+  Future<int> start() async {
     if (_initialized) {
-      return;
+      return _initCompleter.future;
     }
     _initialized = true;
 
-    try {
-      _socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-    } on Exception catch (e) {
-      return _fireOnConnectFailedCallBack(e);
-    }
+    _socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
 
     _selfNode = DHTNode(id: NodeId.random(), ip: _socket!.address, port: _socket!.port);
     _addNode(_selfNode);
 
-    connected = true;
-    _fireOnConnectedCallBack(_socket!.port);
+    _connected = true;
 
     _socket!.listen(
       (RawSocketEvent event) {
         if (event == RawSocketEvent.read) {
           _processResponse(_socket!.receive());
-        } else {
-          Log.warning('Unknown event: $event');
+        }
+        if (event == RawSocketEvent.write && !_socketCompleter.isCompleted) {
+          _socketCompleter.complete();
         }
       },
       onError: (Object error, StackTrace stackTrace) {
@@ -79,30 +125,12 @@ class DHTManager with DHTManagerEventDispatcher {
         return _fireOnDisconnectedCallBack();
       },
     );
+
+    _initCompleter.complete(_socket!.port);
+    return _socket!.port;
   }
 
-  void pause() {
-    if (_disposed) {
-      throw DHTException('DHTManager has been disposed');
-    }
-
-    if (paused) {
-      return;
-    }
-    paused = true;
-  }
-
-  void resume() {
-    if (_disposed) {
-      throw DHTException('DHTManager has been disposed');
-    }
-
-    if (!paused) {
-      return;
-    }
-    paused = false;
-  }
-
+  @override
   void dispose() {
     if (_disposed) {
       return;
@@ -113,12 +141,11 @@ class DHTManager with DHTManagerEventDispatcher {
     _socket = null;
 
     _root.clear();
-    _discardNodes.clear();
 
-    for (var record in _pendingRequests.values) {
+    for (var record in _pendingTransactions.values) {
       record.timer.cancel();
     }
-    _pendingRequests.clear();
+    _pendingTransactions.clear();
 
     for (var record in _refreshTimer.values) {
       record.cancel();
@@ -131,20 +158,22 @@ class DHTManager with DHTManagerEventDispatcher {
     _tokenTimer.clear();
   }
 
-  bool addNeededInfoHash(Uint8List infoHash) {
-    return _neededInfoHashes.add(infoHash);
-  }
-
-  bool removeNeededInfoHash(Uint8List infoHash) {
-    return _neededInfoHashes.remove(infoHash);
-  }
-
+  @override
   Future<void> tryAddNodeAddress(InternetAddress ip, int port) async {
     if (_root.contains((node) => node.ip == ip && node.port == port)) {
       return;
     }
 
     _sendPing(ip, port);
+  }
+
+  @override
+  void printDebugInfo() {
+    print(JsonEncoder.withIndent('  ').convert({
+      'self': _selfNode.toString(),
+      'infoHashTable': _infoHashTable.map((key, value) => MapEntry(key, value.map((peer) => peer.toString()).toList())),
+      'nodes': _root.nodes.map((node) => node.toString()).toList(),
+    }));
   }
 
   Future<void> _processResponse(Datagram? datagram) async {
@@ -158,7 +187,7 @@ class DHTManager with DHTManagerEventDispatcher {
       return;
     }
 
-    if (paused) {
+    if (_paused) {
       Log.fine('DHTManager is paused, ignore datagram: $datagram');
       return;
     }
@@ -173,7 +202,7 @@ class DHTManager with DHTManagerEventDispatcher {
 
     dynamic y = data[keyType];
     if (y is! Uint8List) {
-      Log.warning('Received invalid message type: $y');
+      Log.warning('Received invalid message type: $y, data: $data');
       return;
     }
 
@@ -181,7 +210,7 @@ class DHTManager with DHTManagerEventDispatcher {
     try {
       type = DHTMessageType.fromBytes(y);
     } on DHTException catch (e) {
-      Log.warning('Received invalid message type: $y', e);
+      Log.warning('Received invalid message type: $y, data: $data', e);
       return;
     }
 
@@ -294,7 +323,7 @@ class DHTManager with DHTManagerEventDispatcher {
           Log.warning('Received invalid nodes: $rawNodes');
           return;
         }
-        if (rawPeers != null && rawPeers is! Uint8List) {
+        if (rawPeers != null && rawPeers is! List) {
           Log.warning('Received invalid peers: $rawPeers');
           return;
         }
@@ -336,75 +365,96 @@ class DHTManager with DHTManagerEventDispatcher {
   }
 
   Future<void> _sendPing(InternetAddress ip, int port) async {
-    assert(_socket != null);
-    Log.finest('Sending ping message to $ip:$port');
-
     _sendQueryMessage(PingMessage(id: _selfNode.id), ip, port);
   }
 
   Future<void> _sendFindNode(DHTNode node) async {
-    assert(_socket != null);
-    Log.finest('Sending find node message to ${node.ip}:${node.port}');
-
     _sendQueryMessage(FindNodeMessage(id: _selfNode.id, target: _selfNode.id), node.ip, node.port);
   }
 
   Future<void> _sendGetPeers(DHTNode node, Uint8List infoHash) async {
-    assert(_socket != null);
-    Log.finest('Sending get peers message to ${node.ip}:${node.port}');
-
     _sendQueryMessage(GetPeersMessage(id: _selfNode.id, infoHash: infoHash), node.ip, node.port);
   }
 
   Future<void> _sendQueryMessage(QueryMessage message, InternetAddress ip, int port) async {
-    if (!connected) {
+    assert(_socket != null);
+
+    if (!_connected) {
       Log.fine('Not connected to DHT network, ignoring query message: $message');
       return;
     }
 
-    if (paused) {
+    if (_paused) {
       Log.fine('DHT is paused, ignoring query message: $message');
       return;
     }
 
     Uint8List tid = _generateTransactionId();
-    while (_pendingRequests[tid] != null) {
+    while (_pendingTransactions[tid.toHexString] != null) {
       tid = _generateTransactionId();
     }
     message.tid = tid;
 
     if (message is! AnnouncePeerMessage) {
-      _pendingRequests[tid] = (message: message, timer: Timer(queryTimeout, () => _resendQueryMessageOnce(tid, ip, port)));
+      _pendingTransactions[tid.toHexString] = (message: message, timer: Timer(queryTimeout, () => _resendQueryMessageOnce(tid, ip, port)));
     }
 
-    _socket!.send(message.toUint8List, ip, port);
+    Log.finest('Sending $message to ${ip.address}:$port, tid:$tid');
+
+    _sendSocketWithRetry(message.toUint8List, ip, port);
   }
 
   void _resendQueryMessageOnce(Uint8List tid, InternetAddress ip, int port) {
-    ({QueryMessage message, Timer timer})? record = _pendingRequests.remove(tid);
+    ({QueryMessage message, Timer timer})? record = _pendingTransactions.remove(tid.toHexString);
     if (record == null) {
       return;
     }
 
-    _pendingRequests[tid] = (message: record.message, timer: Timer(queryTimeout, () => _removeNodeAddress(ip, port)));
+    Log.finest('Resending ${record.message} to ${ip.address}:$port, tid: $tid');
 
-    _socket!.send(record.message.toUint8List, ip, port);
+    _pendingTransactions[tid.toHexString] = (
+      message: record.message,
+      timer: Timer(queryTimeout, () {
+        Log.finest('Waiting for response timeout, removing node address: ${ip.address}:$port');
+
+        _pendingTransactions.remove(tid.toHexString);
+        _removeNodeAddress(ip, port);
+      }),
+    );
+
+    _sendSocketWithRetry(record.message.toUint8List, ip, port);
   }
 
   Future<void> _sendResponseMessage(ResponseMessage message, InternetAddress ip, int port) async {
-    if (!connected) {
+    if (!_connected) {
       Log.fine('Not connected to DHT network, ignoring response message: $message');
       return;
     }
 
-    if (paused) {
+    if (_paused) {
       Log.fine('DHT is paused, ignoring response message: $message');
       return;
     }
 
-    Log.finest('Sending response message to $ip:$port, message: ${message}');
+    Log.finest('Sending response message to ${ip.address}:$port, message: ${message}');
 
-    _socket!.send(message.toUint8List, ip, port);
+    _sendSocketWithRetry(message.toUint8List, ip, port);
+  }
+
+  Future<void> _sendSocketWithRetry(Uint8List bytes, InternetAddress ip, int port) async {
+    await _socketCompleter.future;
+
+    int times = 0;
+
+    while (_socket!.send(bytes, ip, port) == 0) {
+      if (times++ >= 3) {
+        Log.warning('Failed to send message to ${ip.address}:$port, giving up');
+        return;
+      }
+
+      await Future.delayed(Duration(milliseconds: 50));
+      Log.finest('Failed to send message to ${ip.address}:$port, retrying for $times time');
+    }
   }
 
   Future<void> _processPingMessage(PingMessage pingMessage, InternetAddress ip, int port) async {
@@ -426,11 +476,11 @@ class DHTManager with DHTManagerEventDispatcher {
   Future<void> _processGetPeersMessage(GetPeersMessage getPeersMessage, InternetAddress ip, int port) async {
     Log.finest('Received get peers message from ${ip.address}:$port, id: ${getPeersMessage.id}, info hash: ${getPeersMessage.infoHash}');
 
-    List<Peer>? peers = _infoHashTable[getPeersMessage.infoHash];
+    List<Peer>? peers = _infoHashTable[getPeersMessage.infoHash.toHexString];
     List<DHTNode> nodes = _findClosestNodes(DHTNode(id: NodeId(id: getPeersMessage.infoHash), ip: ip, port: port));
 
     Uint8List token = _generateToken(ip, port);
-    _tokenTimer[(ip: ip, port: port)] = (token: token, timer: Timer(tokenExpireTime, () => _tokenTimer.remove((ip: ip, port: port))));
+    _tokenTimer[(ip: ip, port: port)] = (token: token, timer: Timer(DHTManager.tokenExpireTime, () => _tokenTimer.remove((ip: ip, port: port))));
 
     await _sendResponseMessage(ResponseMessage(tid: getPeersMessage.tid, node: _selfNode, nodes: nodes, peers: peers), ip, port);
   }
@@ -445,28 +495,26 @@ class DHTManager with DHTManagerEventDispatcher {
       return;
     }
 
-    _tokenTimer[(ip: ip, port: port)] = (token: exitsToken, timer: Timer(tokenExpireTime, () => _tokenTimer.remove((ip: ip, port: port))));
+    _tokenTimer[(ip: ip, port: port)] = (token: exitsToken, timer: Timer(DHTManager.tokenExpireTime, () => _tokenTimer.remove((ip: ip, port: port))));
 
     Peer peer = Peer(ip: ip, port: announcePeerMessage.impliedPort ? port : announcePeerMessage.port);
 
-    (_infoHashTable[announcePeerMessage.infoHash] ??= []).add(peer);
+    (_infoHashTable[announcePeerMessage.infoHash.toHexString] ??= []).add(peer);
 
     _fireOnNewPeersFoundCallBack(announcePeerMessage.infoHash, [peer]);
   }
 
   void _processResponseMessage(ResponseMessage response) {
-    if (_pendingRequests[response.tid] == null) {
+    if (_pendingTransactions[response.tid.toHexString] == null) {
       Log.info('DHT received response with unknown transaction id: ${response.tid}');
       return;
     }
 
-    ({QueryMessage message, Timer timer}) record = _pendingRequests.remove(response.tid)!;
+    ({QueryMessage message, Timer timer}) record = _pendingTransactions.remove(response.tid.toHexString)!;
     record.timer.cancel();
 
-    if (_refreshTimer[response.node] != null) {
-      _refreshTimer[response.node]!.cancel();
-      _refreshTimer[response.node] = Timer(nodeRefreshPeriod, () => _sendPing(response.node.ip, response.node.port));
-    }
+    _refreshTimer[response.node]?.cancel();
+    _refreshTimer[response.node] = Timer(DHTManager.nodeRefreshPeriod, () => _sendPing(response.node.ip, response.node.port));
 
     switch (record.message.runtimeType) {
       case PingMessage:
@@ -485,14 +533,14 @@ class DHTManager with DHTManagerEventDispatcher {
   }
 
   void _processPingResponse(PingMessage message, ResponseMessage response) {
-    Log.finest('DHT received ping response: ${response.node}');
+    Log.finest('DHT received ping response: $response');
 
     _addNodeAndRequire(response.node);
   }
 
   void _processFindNodeResponse(FindNodeMessage message, ResponseMessage response) {
     assert(_root.containsNode(response.node));
-    Log.finest('DHT received find node response: ${response.node}');
+    Log.finest('DHT received find node response: $response');
 
     if (response.nodes == null) {
       Log.warning('DHT received find node response but no nodes found');
@@ -506,7 +554,7 @@ class DHTManager with DHTManagerEventDispatcher {
 
   void _processGetPeersResponse(GetPeersMessage message, ResponseMessage response) {
     assert(_root.containsNode(response.node));
-    Log.finest('DHT received get peers response: ${response.node}');
+    Log.finest('DHT received get peers response: $response');
 
     if (response.nodes == null && response.peers == null) {
       Log.warning('DHT received get peers response but no nodes or peers found');
@@ -519,8 +567,10 @@ class DHTManager with DHTManagerEventDispatcher {
 
     _root.getNode(response.node)!.token = response.token;
 
-    if (response.peers != null) {
-      (_infoHashTable[message.infoHash] ??= []).addAll(response.peers!);
+    if (response.peers != null && response.peers!.isNotEmpty) {
+      Log.info('DHT received ${response.peers!.length} peers from ${response.node}');
+
+      (_infoHashTable[message.infoHash.toHexString] ??= []).addAll(response.peers!);
       _fireOnNewPeersFoundCallBack(message.infoHash, response.peers!);
     }
 
@@ -531,19 +581,18 @@ class DHTManager with DHTManagerEventDispatcher {
     }
   }
 
-  void _refreshDHTNode(DHTNode node) {}
-
-  void _addNodeAndRequire(DHTNode node) {
+  bool _addNodeAndRequire(DHTNode node) {
     if (_addNode(node)) {
       Log.finest('DHT added node: $node');
 
-      for (Uint8List infoHash in _neededInfoHashes) {
-        _sendGetPeers(node, infoHash);
+      for (String infoHash in _neededInfoHashes) {
+        _sendGetPeers(node, infoHash.toUint8ListFromHex);
       }
       _sendFindNode(node);
+      return true;
     } else {
-      Log.fine('DHT received ping response but failed to add node: $node');
-      _discardNodes.add(node);
+      Log.finest('DHT received ping response but failed to add node: $node');
+      return false;
     }
   }
 
@@ -600,37 +649,11 @@ class DHTManager with DHTManagerEventDispatcher {
 }
 
 mixin DHTManagerEventDispatcher {
-  final Set<void Function(int)> _onConnectedCallBacks = {};
-  final Set<void Function(dynamic)> _onConnectFailedCallBacks = {};
   final Set<void Function(dynamic)> _onConnectInterruptedCallBacks = {};
   final Set<void Function()> _onDisconnectedCallBacks = {};
   final Set<void Function(dynamic)> _onSendMessageFailedCallBacks = {};
 
   final Set<void Function(Uint8List infoHash, List<Peer> peers)> _onNewPeersFoundCallBacks = {};
-
-  void addOnConnectedCallBack(void Function(int) callback) => _onConnectedCallBacks.add(callback);
-
-  bool removeOnConnectedCallBack(void Function(int) callback) => _onConnectedCallBacks.remove(callback);
-
-  void _fireOnConnectedCallBack(int port) {
-    for (var callback in _onConnectedCallBacks) {
-      Timer.run(() {
-        callback(port);
-      });
-    }
-  }
-
-  void addOnConnectFailedCallBack(void Function(dynamic) callback) => _onConnectFailedCallBacks.add(callback);
-
-  bool removeOnConnectFailedCallBack(void Function(dynamic) callback) => _onConnectFailedCallBacks.remove(callback);
-
-  void _fireOnConnectFailedCallBack(dynamic error) {
-    for (var callback in _onConnectFailedCallBacks) {
-      Timer.run(() {
-        callback(error);
-      });
-    }
-  }
 
   void addOnConnectInterruptedCallBack(void Function(dynamic) callback) => _onConnectInterruptedCallBacks.add(callback);
 

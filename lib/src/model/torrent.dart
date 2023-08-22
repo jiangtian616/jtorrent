@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:jtorrent/src/exception/torrent_parse_exception.dart';
 import 'package:jtorrent/src/extension/uint8_list_extension.dart';
-import 'package:jtorrent/src/extension/utf8_extension.dart';
 import 'package:jtorrent_bencoding/jtorrent_bencoding.dart';
 
 /// http://bittorrent.org/beps/bep_0003.html
@@ -38,6 +37,9 @@ class Torrent {
   /// SHA1 hashes of all pieces
   final List<Uint8List> pieceSha1s;
 
+  /// DHT nodes
+  final List<Uri>? nodes;
+
   List<String> get pieceSha1sInHex => pieceSha1s
       .map((charCodes) => charCodes.map((char) => char.toRadixString(16)).map((char) => char.length == 2 ? char : '0$char').toList().join())
       .toList();
@@ -54,6 +56,7 @@ class Torrent {
     required this.name,
     required this.files,
     required this.pieceSha1s,
+    this.nodes,
   });
 
   static Future<Torrent> fromFile(File file) {
@@ -77,6 +80,7 @@ class Torrent {
       name: _parseName(content['info']['name']),
       files: _parseFiles(content['info']['length'], content['info']['files']),
       infoHash: _parseInfoHash(content['info']),
+      nodes: _parseNodes(content['nodes']),
       createTime: _parseCreateTime(content['creation date']),
       comment: _parseComment(content['comment']),
       createdBy: _parseCreateBy(content['created by']),
@@ -236,6 +240,37 @@ class Torrent {
     }
 
     return length;
+  }
+
+  static List<Uri>? _parseNodes(dynamic content) {
+    if (content is! List) {
+      return null;
+    }
+
+    List<Uri> nodes = [];
+    for (dynamic node in content) {
+      if (node is! List) {
+        throw TorrentParseException('Torrent content is invalid, [nodes.node] is not a List, node: $node is a ${node.runtimeType}');
+      }
+
+      if (node.length < 2) {
+        throw TorrentParseException('Torrent content is invalid, [nodes.node] is not a valid node, node: $node');
+      }
+
+      dynamic host = node[0];
+      dynamic port = node[1];
+
+      if (host is! Uint8List) {
+        throw TorrentParseException('Torrent content is invalid, [nodes.node.host] is not a Uint8List, host: $host is a ${host.runtimeType}');
+      }
+      if (port is! int) {
+        throw TorrentParseException('Torrent content is invalid, [nodes.node.port] is not a int, port: $port is a ${port.runtimeType}');
+      }
+
+      nodes.add(Uri(host: host.toUTF8, port: port));
+    }
+
+    return nodes;
   }
 
   static DateTime? _parseCreateTime(dynamic timeStamp) {

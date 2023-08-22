@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:jtorrent/src/announce/tracker.dart';
-import 'package:jtorrent/src/extension/utf8_extension.dart';
+import 'package:jtorrent/src/extension/uint8_list_extension.dart';
 import 'package:jtorrent_bencoding/jtorrent_bencoding.dart';
 
 import '../exception/announce_exception.dart';
@@ -133,7 +133,7 @@ class HttpTracker extends Tracker {
     Set<Peer> peerSet = {};
     for (int i = 0; i < peers.length; i += 6) {
       InternetAddress ip = InternetAddress.fromRawAddress(peers.sublist(i, i + 4), type: InternetAddressType.IPv4);
-      int port = peers[i + 4] * (2 << 7) + peers[i + 5];
+      int port = (peers[i + 4] << 8) + peers[i + 5];
       peerSet.add(Peer(ip: ip, port: port));
     }
 
@@ -156,7 +156,7 @@ class HttpTracker extends Tracker {
     Set<Peer> peerSet = {};
     for (int i = 0; i < peers6.length; i += 18) {
       InternetAddress ip = InternetAddress.fromRawAddress(peers6.sublist(i, i + 16), type: InternetAddressType.IPv6);
-      int port = peers6[i + 16] << 8 + peers6[i + 17];
+      int port = (peers6[i + 16] << 8) + peers6[i + 17];
       peerSet.add(Peer(ip: ip, port: port));
     }
 

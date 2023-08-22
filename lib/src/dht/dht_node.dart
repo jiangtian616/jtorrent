@@ -1,8 +1,8 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:jtorrent/src/dht/struct/bucket.dart';
 import 'package:jtorrent/src/dht/struct/node.dart';
+import 'package:jtorrent/src/extension/uint8_list_extension.dart';
 
 import 'struct/node_id.dart';
 
@@ -37,7 +37,7 @@ class DHTNode extends AbstractNode {
     for (var i = 0; i < list.length; i += 26) {
       final id = NodeId(id: list.sublist(i, i + 20));
       final ip = InternetAddress.fromRawAddress(list.sublist(i + 20, i + 24));
-      final port = list[i + 24] << 8 + list[i + 25];
+      final port = (list[i + 24] << 8) + list[i + 25];
       nodes.add(DHTNode(id: id, ip: ip, port: port));
     }
 
@@ -46,7 +46,7 @@ class DHTNode extends AbstractNode {
 
   @override
   String toString() {
-    return 'DHTNode{ip: $ip, port: $port}';
+    return 'DHTNode{id: $id, ip: ${ip.address}, port: $port, token: $token}';
   }
 
   @override

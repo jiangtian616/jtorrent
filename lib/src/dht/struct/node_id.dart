@@ -2,6 +2,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
+import 'package:jtorrent/src/extension/uint8_list_extension.dart';
 
 import '../../constant/common_constants.dart';
 import 'node_distance.dart';
@@ -19,8 +20,8 @@ class NodeId {
     return NodeId(id: id);
   }
 
-  static NodeId min = NodeId(id: List.generate(CommonConstants.nodeIdLength, (index) => 0));
-  static NodeId max = NodeId(id: List.generate(CommonConstants.nodeIdLength, (index) => 255));
+  static NodeId min = NodeId(id: [0]);
+  static NodeId max = NodeId(id: [1] + List.generate(CommonConstants.nodeIdLength, (index) => 0));
 
   NodeDistance distanceWith(NodeId other) {
     return NodeDistance(xor(other));
@@ -35,7 +36,7 @@ class NodeId {
   }
 
   @override
-  int get hashCode => id.hashCode;
+  int get hashCode => id.toHexString.hashCode;
 
   @override
   bool operator ==(other) {
@@ -93,15 +94,24 @@ class NodeId {
 
     Uint8List result = Uint8List(CommonConstants.nodeIdLength);
 
-    bool mod = false;
+    bool addHighBit = false;
     for (var i = 0; i < CommonConstants.nodeIdLength; i++) {
-      result[i] = (a.id[i] + b.id[i]) >> 1;
-      if (mod) {
-        result[i] |= 1 << 8;
+      result[i] = a.id[i] + b.id[i];
+
+      bool oldAddHighBit = addHighBit;
+      addHighBit = result[i] & 1 == 1;
+      result[i] >>= 1;
+
+      if (oldAddHighBit) {
+        result[i] |= (1 << 8);
       }
-      mod = (a.id[i] + b.id[i]) & 1 == 1;
     }
 
     return NodeId(id: result);
+  }
+
+  @override
+  String toString() {
+    return id.toHexString;
   }
 }

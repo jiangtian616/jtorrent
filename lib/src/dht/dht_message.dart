@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:jtorrent/src/dht/dht_node.dart';
 import 'package:jtorrent/src/dht/struct/node_id.dart';
 import 'package:jtorrent/src/exception/dht_exception.dart';
+import 'package:jtorrent/src/extension/uint8_list_extension.dart';
 import 'package:jtorrent_bencoding/jtorrent_bencoding.dart';
 
 import '../model/peer.dart';
@@ -76,6 +77,11 @@ class PingMessage extends QueryMessage {
   final NodeId id;
 
   PingMessage({required this.id}) : super(method: methodPing, arguments: {keyNodeId: id.id});
+
+  @override
+  String toString() {
+    return 'PingMessage{id: $id}';
+  }
 }
 
 class FindNodeMessage extends QueryMessage {
@@ -83,6 +89,11 @@ class FindNodeMessage extends QueryMessage {
   final NodeId target;
 
   FindNodeMessage({required this.id, required this.target}) : super(method: methodFindNode, arguments: {keyNodeId: id.id, keyTarget: target.id});
+
+  @override
+  String toString() {
+    return 'FindNodeMessage{id: $id, target: $target}';
+  }
 }
 
 class GetPeersMessage extends QueryMessage {
@@ -90,6 +101,11 @@ class GetPeersMessage extends QueryMessage {
   final Uint8List infoHash;
 
   GetPeersMessage({required this.id, required this.infoHash}) : super(method: methodGetPeers, arguments: {keyNodeId: id.id, keyInfoHash: infoHash});
+
+  @override
+  String toString() {
+    return 'GetPeersMessage{id: $id, infoHash: ${infoHash.toHexString}}';
+  }
 }
 
 class AnnouncePeerMessage extends QueryMessage {
@@ -110,6 +126,11 @@ class AnnouncePeerMessage extends QueryMessage {
             keyToken: token,
           },
         );
+
+  @override
+  String toString() {
+    return 'AnnouncePeerMessage{id: $id, infoHash: $infoHash, port: $port, impliedPort: $impliedPort, token: $token}';
+  }
 }
 
 class ResponseMessage extends DHTMessage {

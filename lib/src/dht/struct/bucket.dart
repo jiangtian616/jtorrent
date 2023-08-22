@@ -59,8 +59,6 @@ class Bucket<T extends AbstractNode> extends TreeNode {
   }
 
   bool addNode(T node) {
-    assert(node.bucket == null);
-
     if (node.id < rangeBegin || node.id > rangeEnd) {
       throw DHTException('Node ${node.id} is out of bucket range $rangeBegin - $rangeEnd');
     }
@@ -126,8 +124,8 @@ class Bucket<T extends AbstractNode> extends TreeNode {
       throw DHTException('Bucket is too small to split');
     }
 
-    leftChild = Bucket(rangeBegin: rangeBegin, rangeEnd: middle);
-    rightChild = Bucket(rangeBegin: middle, rangeEnd: rangeEnd);
+    leftChild = Bucket<T>(rangeBegin: rangeBegin, rangeEnd: middle);
+    rightChild = Bucket<T>(rangeBegin: middle, rangeEnd: rangeEnd);
 
     for (T node in _nodes) {
       if (node.id < middle) {
@@ -163,7 +161,7 @@ class Bucket<T extends AbstractNode> extends TreeNode {
   }
 
   void removeNodeWhere(bool Function(T node) test) {
-    for (T node in _nodes.where(test)) {
+    for (T node in _nodes.where(test).toList()) {
       assert(node.bucket != null);
 
       removeNode(node);
