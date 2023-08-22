@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:jtorrent/src/dht/struct/bucket.dart';
 import 'package:jtorrent/src/dht/struct/node.dart';
 
 import 'struct/node_id.dart';
@@ -9,7 +10,7 @@ class DHTNode extends AbstractNode {
   final InternetAddress ip;
 
   final int port;
-  
+
   Uint8List? token;
 
   DHTNode({required super.id, required this.ip, required this.port});

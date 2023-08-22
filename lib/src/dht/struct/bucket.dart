@@ -13,13 +13,17 @@ class Bucket<T extends AbstractNode> extends TreeNode {
 
   final NodeId rangeEnd;
 
+  Set<T> get nodes => Set.unmodifiable(_nodes);
+
   int get size => _nodes.length;
 
   Bucket({required this.rangeBegin, required this.rangeEnd});
 
-  Bucket? get leftBucket => leftChild as Bucket?;
+  Bucket<T>? get leftBucket => leftChild as Bucket<T>?;
 
-  Bucket? get rightBucket => rightChild as Bucket?;
+  Bucket<T>? get rightBucket => rightChild as Bucket<T>?;
+
+  Bucket<T>? get parentBucket => parent as Bucket<T>?;
 
   bool get isParent {
     if (leftChild == null && rightChild == null) {
@@ -39,6 +43,10 @@ class Bucket<T extends AbstractNode> extends TreeNode {
       throw DHTException('Node ${node.id} is out of bucket range $rangeBegin - $rangeEnd');
     }
 
+    if (_nodes.contains(node)) {
+      return false;
+    }
+
     if (isParent) {
       if (node.id < leftBucket!.rangeEnd) {
         return leftBucket!.canAddNode(node);
@@ -46,15 +54,7 @@ class Bucket<T extends AbstractNode> extends TreeNode {
         return rightBucket!.canAddNode(node);
       }
     } else {
-      if (_nodes.length >= maxBucketSize) {
-        return false;
-      }
-
-      if (_nodes.contains(node)) {
-        return false;
-      }
-
-      return true;
+      return _nodes.length < maxBucketSize;
     }
   }
 
@@ -92,6 +92,29 @@ class Bucket<T extends AbstractNode> extends TreeNode {
     }
   }
 
+  Bucket<T> findBucketToLocate(T node) {
+    assert(node.bucket == null);
+
+    if (node.id < rangeBegin || node.id > rangeEnd) {
+      throw DHTException('Node ${node.id} is out of bucket range $rangeBegin - $rangeEnd');
+    }
+
+    T? existNode = getNode(node);
+    if (existNode != null) {
+      return existNode.bucket as Bucket<T>;
+    }
+
+    if (isParent) {
+      if (node.id < leftBucket!.rangeEnd) {
+        return leftBucket!.findBucketToLocate(node);
+      } else {
+        return rightBucket!.findBucketToLocate(node);
+      }
+    } else {
+      return this;
+    }
+  }
+
   void split() {
     if (isParent) {
       throw DHTException('Bucket is already splitted');
@@ -123,7 +146,35 @@ class Bucket<T extends AbstractNode> extends TreeNode {
     return _nodes.contains(node);
   }
 
+  void removeNode(T node) {
+    if (!_nodes.remove(node)) {
+      return;
+    }
+    
+    if (isParent) {
+      if (node.id < leftBucket!.rangeEnd) {
+        return leftBucket!.removeNode(node);
+      } else {
+        return rightBucket!.removeNode(node);
+      }
+    }
+
+    node.bucket = null;
+  }
+
+  void removeNodeWhere(bool Function(T node) test) {
+    for (T node in _nodes.where(test)) {
+      assert(node.bucket != null);
+
+      removeNode(node);
+    }
+  }
+
   T? getNode(T node) {
     return _nodes.lookup(node);
+  }
+
+  void clear() {
+    _nodes.clear();
   }
 }

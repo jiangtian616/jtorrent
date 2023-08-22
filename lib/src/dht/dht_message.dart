@@ -17,6 +17,7 @@ const String keyNodeId = 'id';
 const String keyTarget = 'target';
 const String keyInfoHash = 'info_hash';
 const String keyPort = 'port';
+const String keyImpliedPort = 'implied_port';
 const String keyToken = 'token';
 const String keyNodes = 'nodes';
 const String keyValues = 'values';
@@ -95,10 +96,20 @@ class AnnouncePeerMessage extends QueryMessage {
   final NodeId id;
   final Uint8List infoHash;
   final int port;
+  final bool impliedPort;
   final Uint8List token;
 
-  AnnouncePeerMessage({required this.id, required this.infoHash, required this.port, required this.token})
-      : super(method: methodAnnouncePeer, arguments: {keyNodeId: id.id, keyInfoHash: infoHash, keyPort: port, keyToken: token});
+  AnnouncePeerMessage({required this.id, required this.infoHash, required this.port, required this.impliedPort, required this.token})
+      : super(
+          method: methodAnnouncePeer,
+          arguments: {
+            keyNodeId: id.id,
+            keyInfoHash: infoHash,
+            keyPort: port,
+            keyImpliedPort: impliedPort,
+            keyToken: token,
+          },
+        );
 }
 
 class ResponseMessage extends DHTMessage {
@@ -121,11 +132,16 @@ class ResponseMessage extends DHTMessage {
         keyType: Uint8List.fromList(type.bytes),
         keyResponse: {
           keyNodeId: node.id.id,
-          if (nodes != null) keyNodes: DHTNode.toCompactList(nodes!),
-          if (peers != null) keyValues: Peer.toCompactList(peers!),
+          if (nodes != null && nodes!.isNotEmpty) keyNodes: DHTNode.toCompactList(nodes!),
+          if (peers != null && peers!.isNotEmpty) keyValues: Peer.toCompactList(peers!),
           if (token != null) keyToken: token,
         },
       });
+
+  @override
+  String toString() {
+    return 'ResponseMessage{tid: $tid, node: $node, nodes: $nodes, peers: $peers, token: $token}';
+  }
 }
 
 class ErrorMessage extends DHTMessage {

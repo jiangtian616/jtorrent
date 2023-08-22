@@ -57,4 +57,16 @@ class NodeDistance {
   bool operator <(other) {
     return !(this >= other);
   }
+  
+  int compareTo(NodeDistance other) {
+    for (var i = 0; i < values.length; i++) {
+      if (values[i] > other.values[i]) {
+        return 1;
+      } else if (values[i] < other.values[i]) {
+        return -1;
+      }
+    }
+
+    return 0;
+  }
 }
