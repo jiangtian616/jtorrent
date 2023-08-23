@@ -1,4 +1,8 @@
 class TreeNode {
+  int _layer = 0;
+
+  int get layer => _layer;
+  
   TreeNode? _leftChild;
 
   TreeNode? _rightChild;
@@ -22,6 +26,7 @@ class TreeNode {
     }
 
     node?.parent = this;
+    node?._layer = _layer + 1;
 
     _rightChild = node;
   }
@@ -39,6 +44,7 @@ class TreeNode {
     }
 
     node?.parent = this;
+    node?._layer = _layer + 1;
 
     _leftChild = node;
   }

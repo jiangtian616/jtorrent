@@ -84,33 +84,9 @@ class NodeId {
     return !(this >= other);
   }
 
-  static NodeId middleNodeId(NodeId a, NodeId b) {
-    if (a == b) {
-      return NodeId(id: a.id);
-    }
-
-    if (a > b) {
-      return middleNodeId(b, a);
-    }
-
-    List<int> result = List.generate(CommonConstants.nodeIdLength, (index) => 0);
-
-    for (var i = 0; i < CommonConstants.nodeIdLength; i++) {
-      result[i] = a.id[i] + b.id[i];
-    }
-
-    bool addHighBit = false;
-    for (var i = 0; i < CommonConstants.nodeIdLength; i++) {
-      if (addHighBit) {
-        result[i] += (1 << 8);
-      }
-
-      addHighBit = (result[i] & 1) == 1;
-
-      result[i] >>= 1;
-    }
-
-    return NodeId(id: result);
+  int value4Index(int index) {
+    assert(index >= 0 && index < id.length * 8);
+    return id[index ~/ 8] & (1 << (7 - index % 8));
   }
 
   @override

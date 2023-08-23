@@ -1,29 +1,22 @@
 import 'package:jtorrent/src/dht/struct/node.dart';
+import 'package:jtorrent/src/dht/struct/node_id.dart';
 import 'package:jtorrent/src/dht/struct/tree_node.dart';
 import 'package:jtorrent/src/exception/dht_exception.dart';
-
-import 'node_id.dart';
 
 class Bucket<T extends AbstractNode> extends TreeNode {
   static const int maxBucketSize = 8;
 
   final Set<T> _nodes = {};
 
-  final NodeId rangeBegin;
-
-  final NodeId rangeEnd;
-
   Set<T> get nodes => Set.unmodifiable(_nodes);
 
   int get size => _nodes.length;
 
-  Bucket({required this.rangeBegin, required this.rangeEnd});
+  Bucket<T>? get _leftBucket => leftChild as Bucket<T>?;
 
-  Bucket<T>? get leftBucket => leftChild as Bucket<T>?;
+  Bucket<T>? get _rightBucket => rightChild as Bucket<T>?;
 
-  Bucket<T>? get rightBucket => rightChild as Bucket<T>?;
-
-  Bucket<T>? get parentBucket => parent as Bucket<T>?;
+  Bucket<T>? get _parentBucket => parent as Bucket<T>?;
 
   bool get isParent {
     if (leftChild == null && rightChild == null) {
@@ -37,58 +30,52 @@ class Bucket<T extends AbstractNode> extends TreeNode {
   }
 
   bool addNode(T node) {
-    if (node.id < rangeBegin || node.id >= rangeEnd) {
-      throw DHTException('Node ${node.id} is out of bucket range $rangeBegin - $rangeEnd');
+    assert(parent == null);
+
+    if (_nodes.contains(node)) {
+      return false;
     }
 
-    if (isParent) {
-      bool childAdded;
-      if (node.id < leftBucket!.rangeEnd) {
-        childAdded = leftBucket!.addNode(node);
-      } else {
-        childAdded = rightBucket!.addNode(node);
-      }
-
-      if (childAdded) {
-        _nodes.add(node);
-      }
-
-      return childAdded;
-    } else {
-      if (_nodes.length >= maxBucketSize) {
-        return false;
-      }
-
-      if (!_nodes.add(node)) {
-        return false;
-      }
-
-      node.bucket = this;
-      return true;
+    Bucket<T> bucket = _findBucketToLocate(node.id);
+    if (bucket.size >= maxBucketSize) {
+      return false;
     }
+
+    while (bucket != this) {
+      bucket._nodes.add(node);
+
+      assert(bucket._parentBucket != null);
+      bucket = bucket._parentBucket!;
+    }
+
+    bucket._nodes.add(node);
+    node.bucket = bucket;
+
+    return true;
   }
 
-  Bucket<T> findBucketToLocate(T node) {
-    assert(node.bucket == null);
+  bool removeNode(T node) {
+    assert(parent == null);
 
-    if (node.id < rangeBegin || node.id >= rangeEnd) {
-      throw DHTException('Node ${node.id} is out of bucket range $rangeBegin - $rangeEnd');
+    if (nodes.contains(node) == false) {
+      return false;
     }
 
-    T? existNode = getNode(node);
-    if (existNode != null) {
-      return existNode.bucket as Bucket<T>;
-    }
+    Bucket<T> bucket = this;
+    while (bucket.isParent) {
+      assert(bucket.nodes.contains(node));
 
-    if (isParent) {
-      if (node.id < leftBucket!.rangeEnd) {
-        return leftBucket!.findBucketToLocate(node);
+      bucket._nodes.remove(node);
+
+      if (node.value4Index(bucket.layer) == 0) {
+        bucket = bucket._leftBucket!;
       } else {
-        return rightBucket!.findBucketToLocate(node);
+        bucket = bucket._rightBucket!;
       }
-    } else {
-      return this;
     }
+
+    node.bucket = null;
+    return true;
   }
 
   void split() {
@@ -96,61 +83,64 @@ class Bucket<T extends AbstractNode> extends TreeNode {
       throw DHTException('Bucket is already splitted');
     }
 
-    NodeId middle = NodeId.middleNodeId(rangeBegin, rangeEnd);
-
-    if (middle == rangeBegin || middle == rangeEnd) {
-      throw DHTException('Bucket is too small to split');
-    }
-
-    leftChild = Bucket<T>(rangeBegin: rangeBegin, rangeEnd: middle);
-    rightChild = Bucket<T>(rangeBegin: middle, rangeEnd: rangeEnd);
+    leftChild = Bucket<T>();
+    rightChild = Bucket<T>();
 
     for (T node in _nodes) {
-      if (node.id < middle) {
-        leftBucket!.addNode(node);
+      if (node.value4Index(layer) == 0) {
+        _leftBucket!._nodes.add(node);
+        node.bucket = _leftBucket!;
       } else {
-        rightBucket!.addNode(node);
+        _rightBucket!._nodes.add(node);
+        node.bucket = _rightBucket!;
       }
     }
   }
 
-  bool contains(bool Function(T node) test) {
-    return _nodes.any(test);
-  }
+  List<T> findClosestNodes(NodeId nodeId) {
+    assert(parent == null);
 
-  bool containsNode(T node) {
-    return _nodes.contains(node);
-  }
-
-  void removeNode(T node) {
-    if (!_nodes.remove(node)) {
-      return;
+    Bucket<T> bucket = _findBucketToLocate(nodeId);
+    if (bucket == this) {
+      return List.unmodifiable(_nodes);
     }
 
-    if (isParent) {
-      if (node.id < leftBucket!.rangeEnd) {
-        return leftBucket!.removeNode(node);
+    while (bucket._parentBucket != null && bucket._parentBucket!.size < Bucket.maxBucketSize) {
+      bucket = bucket._parentBucket!;
+    }
+
+    if (bucket._parentBucket == null) {
+      return List.unmodifiable(bucket.nodes);
+    }
+
+    List<T> result = [];
+    result.addAll(bucket.nodes);
+
+    List<T> appendNodes = [];
+    if (bucket._parentBucket!._leftBucket == bucket) {
+      appendNodes = bucket._parentBucket!._rightBucket!.nodes.toList();
+    } else {
+      appendNodes = bucket._parentBucket!._leftBucket!.nodes.toList();
+    }
+
+    appendNodes.sort((a, b) => a.id.distanceWith(nodeId).compareTo(b.id.distanceWith(nodeId)));
+    result.addAll(appendNodes.sublist(0, Bucket.maxBucketSize - result.length));
+
+    return result;
+  }
+
+  Bucket<T> _findBucketToLocate(NodeId nodeId) {
+    Bucket<T> bucket = this;
+    int index = 0;
+    while (bucket.isParent) {
+      if (nodeId.value4Index(index) == 0) {
+        bucket = bucket._leftBucket!;
       } else {
-        return rightBucket!.removeNode(node);
+        bucket = bucket._rightBucket!;
       }
+      index++;
     }
 
-    node.bucket = null;
-  }
-
-  void removeNodeWhere(bool Function(T node) test) {
-    for (T node in _nodes.where(test).toList()) {
-      assert(node.bucket != null);
-
-      removeNode(node);
-    }
-  }
-
-  T? getNode(T node) {
-    return _nodes.lookup(node);
-  }
-
-  void clear() {
-    _nodes.clear();
+    return bucket;
   }
 }

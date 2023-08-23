@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:jtorrent/src/dht/dht_manager.dart';
-import 'package:jtorrent/src/extension/uint8_list_extension.dart';
 import 'package:jtorrent/src/model/torrent.dart';
 import 'package:jtorrent/src/task/torrent_task.dart';
 import 'package:jtorrent/src/util/log_util.dart';
@@ -47,7 +46,7 @@ void main() {
 
         /// eaf301acac97b88f69c1c0e7cb83928f107
         dhtManager.addNeededInfoHash(torrent.infoHash);
-        dhtManager.tryAddNodeAddress(InternetAddress('39.111.79.152'), 6881);
+        dhtManager.tryAddNodeAddress(InternetAddress('126.145.242.222'), 6881);
 
         Timer.periodic(Duration(seconds: 1), (_) {
           dhtManager.printDebugInfo();

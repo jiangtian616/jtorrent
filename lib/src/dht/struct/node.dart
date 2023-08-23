@@ -18,4 +18,9 @@ abstract class AbstractNode {
 
   @override
   int get hashCode => id.hashCode;
+
+  int value4Index(int index) {
+    assert(index >= 0 && index < id.id.length * 8);
+    return id.id[index ~/ 8] & (1 << (7 - index % 8));
+  }
 }

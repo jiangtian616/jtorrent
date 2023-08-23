@@ -88,7 +88,8 @@ class FindNodeMessage extends QueryMessage {
   final NodeId id;
   final NodeId target;
 
-  FindNodeMessage({required this.id, required this.target}) : super(method: methodFindNode, arguments: {keyNodeId: Uint8List.fromList(id.id), keyTarget: Uint8List.fromList(target.id)});
+  FindNodeMessage({required this.id, required this.target})
+      : super(method: methodFindNode, arguments: {keyNodeId: Uint8List.fromList(id.id), keyTarget: Uint8List.fromList(target.id)});
 
   @override
   String toString() {
@@ -100,7 +101,8 @@ class GetPeersMessage extends QueryMessage {
   final NodeId id;
   final Uint8List infoHash;
 
-  GetPeersMessage({required this.id, required this.infoHash}) : super(method: methodGetPeers, arguments: {keyNodeId: Uint8List.fromList(id.id), keyInfoHash: infoHash});
+  GetPeersMessage({required this.id, required this.infoHash})
+      : super(method: methodGetPeers, arguments: {keyNodeId: Uint8List.fromList(id.id), keyInfoHash: infoHash});
 
   @override
   String toString() {
@@ -145,8 +147,7 @@ class ResponseMessage extends DHTMessage {
 
   final Uint8List? token;
 
-  ResponseMessage({super.type = DHTMessageType.response, required this.tid, required this.node, this.nodes, this.peers, this.token})
-      : assert(tid.length == 2);
+  ResponseMessage({super.type = DHTMessageType.response, required this.tid, required this.node, this.nodes, this.peers, this.token});
 
   Uint8List get toUint8List => bEncode({
         keyTransactionId: tid,
@@ -161,7 +162,7 @@ class ResponseMessage extends DHTMessage {
 
   @override
   String toString() {
-    return 'ResponseMessage{tid: $tid, node: $node, nodes: $nodes, peers: $peers, token: $token}';
+    return 'ResponseMessage{tid: $tid, node: ${node.id.id}, nodes: $nodes, peers: $peers, token: $token}';
   }
 }
 
@@ -170,9 +171,10 @@ class ErrorMessage extends DHTMessage {
   final Uint8List tid;
 
   final int code;
+
   final String message;
 
-  ErrorMessage({super.type = DHTMessageType.error, required this.tid, required this.code, required this.message}) : assert(tid.length == 2);
+  ErrorMessage({super.type = DHTMessageType.error, required this.tid, required this.code, required this.message});
 
   Uint8List get toUint8List => bEncode({
         keyTransactionId: tid,
