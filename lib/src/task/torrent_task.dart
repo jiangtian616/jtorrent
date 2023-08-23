@@ -34,7 +34,7 @@ abstract class TorrentTask {
   /// Resume all tasks
   void resume();
 
-  TorrentTaskDebugInfo getDebugInfo();
+  void printDebugInfo();
 }
 
 class _TorrentTask extends TorrentTask implements AnnounceConfigProvider {
@@ -207,14 +207,16 @@ class _TorrentTask extends TorrentTask implements AnnounceConfigProvider {
   }
 
   @override
-  TorrentTaskDebugInfo getDebugInfo() {
-    return TorrentTaskDebugInfo(
-      downloadProgress: downloaded / (downloaded + left),
-      downloadPieceProgress: '${_pieceManager.downloadedPieceCount} / ${_pieceManager.pieceCount}',
-      bitField: _pieceManager.bitField,
-      activeConnections: _peerManager.activeConnections.map((c) => c.peer).toList(),
-      availableConnections: _peerManager.availableConnections.map((c) => c.peer).toList(),
-      pendingPieceRequests: _peerManager.pendingRequests,
+  void printDebugInfo() {
+    print(
+      TorrentTaskDebugInfo(
+        downloadProgress: downloaded / (downloaded + left),
+        downloadPieceProgress: '${_pieceManager.downloadedPieceCount} / ${_pieceManager.pieceCount}',
+        bitField: _pieceManager.bitField,
+        activeConnections: _peerManager.activeConnections.map((c) => c.peer).toList(),
+        availableConnections: _peerManager.availableConnections.map((c) => c.peer).toList(),
+        pendingPieceRequests: _peerManager.pendingRequests,
+      ).format(),
     );
   }
 }
@@ -225,6 +227,7 @@ class TorrentTaskDebugInfo {
   final Uint8List bitField;
   final List<Peer> activeConnections;
   final List<Peer> availableConnections;
+
   final Map<Peer, List<({int pieceIndex, int subPieceIndex})>> pendingPieceRequests;
 
   const TorrentTaskDebugInfo({

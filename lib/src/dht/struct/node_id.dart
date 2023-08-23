@@ -8,11 +8,12 @@ import '../../constant/common_constants.dart';
 import 'node_distance.dart';
 
 class NodeId {
-  final Uint8List id;
+  final List<int> id;
 
   NodeId({required List<int> id})
       : assert(id.length == CommonConstants.nodeIdLength),
-        id = Uint8List.fromList(id);
+        assert(id.every((element) => element >= 0 && element <= 256)),
+        id = List.unmodifiable(id);
 
   static NodeId random() {
     Random random = Random();
@@ -20,14 +21,14 @@ class NodeId {
     return NodeId(id: id);
   }
 
-  static NodeId min = NodeId(id: [0]);
-  static NodeId max = NodeId(id: [1] + List.generate(CommonConstants.nodeIdLength, (index) => 0));
+  static NodeId min = NodeId(id: List.generate(CommonConstants.nodeIdLength, (index) => 0));
+  static NodeId max = NodeId(id: [256] + List.generate(CommonConstants.nodeIdLength - 1, (index) => 0));
 
   NodeDistance distanceWith(NodeId other) {
     return NodeDistance(xor(other));
   }
 
-  Uint8List xor(NodeId other) {
+  List<int> xor(NodeId other) {
     Uint8List result = Uint8List(CommonConstants.nodeIdLength);
     for (var i = 0; i < CommonConstants.nodeIdLength; i++) {
       result[i] = id[i] ^ other.id[i];
@@ -92,19 +93,21 @@ class NodeId {
       return middleNodeId(b, a);
     }
 
-    Uint8List result = Uint8List(CommonConstants.nodeIdLength);
+    List<int> result = List.generate(CommonConstants.nodeIdLength, (index) => 0);
+
+    for (var i = 0; i < CommonConstants.nodeIdLength; i++) {
+      result[i] = a.id[i] + b.id[i];
+    }
 
     bool addHighBit = false;
     for (var i = 0; i < CommonConstants.nodeIdLength; i++) {
-      result[i] = a.id[i] + b.id[i];
-
-      bool oldAddHighBit = addHighBit;
-      addHighBit = result[i] & 1 == 1;
-      result[i] >>= 1;
-
-      if (oldAddHighBit) {
-        result[i] |= (1 << 8);
+      if (addHighBit) {
+        result[i] += (1 << 8);
       }
+
+      addHighBit = (result[i] & 1) == 1;
+
+      result[i] >>= 1;
     }
 
     return NodeId(id: result);

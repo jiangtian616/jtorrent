@@ -76,7 +76,7 @@ abstract class QueryMessage extends DHTMessage {
 class PingMessage extends QueryMessage {
   final NodeId id;
 
-  PingMessage({required this.id}) : super(method: methodPing, arguments: {keyNodeId: id.id});
+  PingMessage({required this.id}) : super(method: methodPing, arguments: {keyNodeId: Uint8List.fromList(id.id)});
 
   @override
   String toString() {
@@ -88,7 +88,7 @@ class FindNodeMessage extends QueryMessage {
   final NodeId id;
   final NodeId target;
 
-  FindNodeMessage({required this.id, required this.target}) : super(method: methodFindNode, arguments: {keyNodeId: id.id, keyTarget: target.id});
+  FindNodeMessage({required this.id, required this.target}) : super(method: methodFindNode, arguments: {keyNodeId: Uint8List.fromList(id.id), keyTarget: Uint8List.fromList(target.id)});
 
   @override
   String toString() {
@@ -100,7 +100,7 @@ class GetPeersMessage extends QueryMessage {
   final NodeId id;
   final Uint8List infoHash;
 
-  GetPeersMessage({required this.id, required this.infoHash}) : super(method: methodGetPeers, arguments: {keyNodeId: id.id, keyInfoHash: infoHash});
+  GetPeersMessage({required this.id, required this.infoHash}) : super(method: methodGetPeers, arguments: {keyNodeId: Uint8List.fromList(id.id), keyInfoHash: infoHash});
 
   @override
   String toString() {
@@ -119,7 +119,7 @@ class AnnouncePeerMessage extends QueryMessage {
       : super(
           method: methodAnnouncePeer,
           arguments: {
-            keyNodeId: id.id,
+            keyNodeId: Uint8List.fromList(id.id),
             keyInfoHash: infoHash,
             keyPort: port,
             keyImpliedPort: impliedPort,
@@ -152,7 +152,7 @@ class ResponseMessage extends DHTMessage {
         keyTransactionId: tid,
         keyType: Uint8List.fromList(type.bytes),
         keyResponse: {
-          keyNodeId: node.id.id,
+          keyNodeId: Uint8List.fromList(node.id.id),
           if (nodes != null && nodes!.isNotEmpty) keyNodes: DHTNode.toCompactList(nodes!),
           if (peers != null && peers!.isNotEmpty) keyValues: Peer.toCompactList(peers!),
           if (token != null) keyToken: token,
@@ -179,4 +179,9 @@ class ErrorMessage extends DHTMessage {
         keyType: Uint8List.fromList(type.bytes),
         keyError: [code, message],
       });
+
+  @override
+  String toString() {
+    return 'ErrorMessage{tid: $tid, code: $code, message: $message}';
+  }
 }

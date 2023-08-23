@@ -36,30 +36,8 @@ class Bucket<T extends AbstractNode> extends TreeNode {
     return true;
   }
 
-  bool canAddNode(T node) {
-    assert(node.bucket == null);
-
-    if (node.id < rangeBegin || node.id > rangeEnd) {
-      throw DHTException('Node ${node.id} is out of bucket range $rangeBegin - $rangeEnd');
-    }
-
-    if (_nodes.contains(node)) {
-      return false;
-    }
-
-    if (isParent) {
-      if (node.id < leftBucket!.rangeEnd) {
-        return leftBucket!.canAddNode(node);
-      } else {
-        return rightBucket!.canAddNode(node);
-      }
-    } else {
-      return _nodes.length < maxBucketSize;
-    }
-  }
-
   bool addNode(T node) {
-    if (node.id < rangeBegin || node.id > rangeEnd) {
+    if (node.id < rangeBegin || node.id >= rangeEnd) {
       throw DHTException('Node ${node.id} is out of bucket range $rangeBegin - $rangeEnd');
     }
 
@@ -93,7 +71,7 @@ class Bucket<T extends AbstractNode> extends TreeNode {
   Bucket<T> findBucketToLocate(T node) {
     assert(node.bucket == null);
 
-    if (node.id < rangeBegin || node.id > rangeEnd) {
+    if (node.id < rangeBegin || node.id >= rangeEnd) {
       throw DHTException('Node ${node.id} is out of bucket range $rangeBegin - $rangeEnd');
     }
 
@@ -148,7 +126,7 @@ class Bucket<T extends AbstractNode> extends TreeNode {
     if (!_nodes.remove(node)) {
       return;
     }
-    
+
     if (isParent) {
       if (node.id < leftBucket!.rangeEnd) {
         return leftBucket!.removeNode(node);

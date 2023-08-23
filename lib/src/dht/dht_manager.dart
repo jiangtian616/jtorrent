@@ -90,7 +90,9 @@ class _DHTManager extends DHTManager with DHTManagerEventDispatcher {
   final Completer<void> _socketCompleter = Completer<void>();
 
   final Map<String, ({QueryMessage message, Timer timer})> _pendingTransactions = {};
+
   final Map<DHTNode, Timer> _refreshTimer = {};
+
   final Map<({InternetAddress ip, int port}), ({Uint8List token, Timer timer})> _tokenTimer = {};
 
   _DHTManager() : super._();
@@ -160,7 +162,7 @@ class _DHTManager extends DHTManager with DHTManagerEventDispatcher {
 
   @override
   Future<void> tryAddNodeAddress(InternetAddress ip, int port) async {
-    if (_root.contains((node) => node.ip == ip && node.port == port)) {
+    if (_root.contains((node) => node.ip.address == ip.address && node.port == port)) {
       return;
     }
 
@@ -170,8 +172,9 @@ class _DHTManager extends DHTManager with DHTManagerEventDispatcher {
   @override
   void printDebugInfo() {
     print(JsonEncoder.withIndent('  ').convert({
-      'self': _selfNode.toString(),
-      'infoHashTable': _infoHashTable.map((key, value) => MapEntry(key, value.map((peer) => peer.toString()).toList())),
+      'neededInfoHashes': _neededInfoHashes.toList(),
+      'infoHashTable': _infoHashTable.map((key, value) => MapEntry(key, value.map((peer) => '${peer.ip.address}:${peer.port}').toList())),
+      'selfNode': _selfNode.toString(),
       'nodes': _root.nodes.map((node) => node.toString()).toList(),
     }));
   }
@@ -195,7 +198,7 @@ class _DHTManager extends DHTManager with DHTManagerEventDispatcher {
     Map data;
     try {
       data = bDecode(datagram.data);
-    } on BDecodingException catch (e) {
+    } on Exception catch (e) {
       Log.warning('Received invalid datagram: ${datagram.data}', e);
       return;
     }
@@ -353,12 +356,12 @@ class _DHTManager extends DHTManager with DHTManagerEventDispatcher {
           Log.warning('Received invalid error code: $code');
           return;
         }
-        if (error is! String) {
+        if (error is! Uint8List) {
           Log.warning('Received invalid error message: $error');
           return;
         }
 
-        return _processErrorMessage(ErrorMessage(tid: tid, code: code, message: error));
+        return _processErrorMessage(ErrorMessage(tid: tid, code: code, message: error.toUTF8));
       default:
         Log.severe('Unknown message type: $type');
     }
@@ -548,7 +551,7 @@ class _DHTManager extends DHTManager with DHTManagerEventDispatcher {
     }
 
     for (DHTNode node in response.nodes!) {
-      _addNodeAndRequire(node);
+      tryAddNodeAddress(node.ip, node.port);
     }
   }
 
@@ -576,24 +579,21 @@ class _DHTManager extends DHTManager with DHTManagerEventDispatcher {
 
     if (response.nodes != null) {
       for (DHTNode node in response.nodes!) {
-        _addNodeAndRequire(node);
+        tryAddNodeAddress(node.ip, node.port);
       }
     }
   }
 
   bool _addNodeAndRequire(DHTNode node) {
-    if (_addNode(node)) {
-      Log.finest('DHT added node: $node');
-
-      for (String infoHash in _neededInfoHashes) {
-        _sendGetPeers(node, infoHash.toUint8ListFromHex);
-      }
-      _sendFindNode(node);
-      return true;
-    } else {
-      Log.finest('DHT received ping response but failed to add node: $node');
+    if (!_addNode(node)) {
       return false;
     }
+
+    for (String infoHash in _neededInfoHashes) {
+      _sendGetPeers(node, infoHash.toUint8ListFromHex);
+    }
+    _sendFindNode(node);
+    return true;
   }
 
   bool _addNode(DHTNode node) {
@@ -601,12 +601,15 @@ class _DHTManager extends DHTManager with DHTManagerEventDispatcher {
 
     bool added = _root.addNode(node);
     if (!added) {
+      Log.finest('DHT failed to add node: $node');
       return false;
     }
 
     assert(node.bucket != null);
+    Log.finest('DHT added node: $node');
 
-    if (node.bucket == _selfNode.bucket && _selfNode.bucket!.size >= Bucket.maxBucketSize) {
+    while (_selfNode.bucket!.size >= Bucket.maxBucketSize) {
+      Log.fine('DHT bucket is full, splitting bucket: ${_selfNode.bucket.hashCode}');
       _selfNode.bucket!.split();
     }
 
@@ -644,7 +647,7 @@ class _DHTManager extends DHTManager with DHTManagerEventDispatcher {
   }
 
   void _removeNodeAddress(InternetAddress ip, int port) {
-    _root.removeNodeWhere((node) => node.ip == ip && node.port == port);
+    _root.removeNodeWhere((node) => node.ip.address == ip.address && node.port == port);
   }
 }
 

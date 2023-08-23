@@ -46,12 +46,12 @@ class DHTNode extends AbstractNode {
 
   @override
   String toString() {
-    return 'DHTNode{id: $id, ip: ${ip.address}, port: $port, token: $token}';
+    return 'DHTNode{id: $id, ip: ${ip.address}, port: $port, token: ${token?.toHexString}, bucket: ${bucket?.hashCode}}';
   }
 
   @override
-  bool operator ==(Object other) => other is DHTNode && id == other.id;
+  bool operator ==(Object other) => other is DHTNode && id == other.id && ip.address == other.ip.address && port == other.port;
 
   @override
-  int get hashCode => id.hashCode;
+  int get hashCode => id.hashCode ^ ip.address.hashCode ^ port.hashCode;
 }
