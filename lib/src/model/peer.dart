@@ -33,10 +33,10 @@ class Peer {
     List<Peer> peers = [];
     for (int i = 0; i < rawPeers.length; i += 6) {
       final ip = InternetAddress.fromRawAddress(rawPeers.sublist(i, i + 4));
-      final port = (rawPeers[i + 4] << 8)+ rawPeers[i + 5];
+      final port = (rawPeers[i + 4] << 8) + rawPeers[i + 5];
       peers.add(Peer(ip: ip, port: port));
     }
-    
+
     return peers;
   }
 
@@ -47,8 +47,8 @@ class Peer {
 
   @override
   bool operator ==(Object other) =>
-      identical(this, other) || other is Peer && runtimeType == other.runtimeType && peerId == other.peerId && ip == other.ip && port == other.port;
+      identical(this, other) || other is Peer && runtimeType == other.runtimeType && ip == other.ip && port == other.port;
 
   @override
-  int get hashCode => peerId.hashCode ^ ip.hashCode ^ port.hashCode;
+  int get hashCode => ip.hashCode ^ port.hashCode;
 }

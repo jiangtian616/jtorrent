@@ -31,8 +31,9 @@ class Log {
   static void output(LogRecord record) {
     final AnsiColor color = levelColors[record.level]!;
 
-    print(color(sprintf('[%s] %s: %s', [
+    print(color(sprintf('[%s]%9s %s: %s', [
       record.time.toString().substring(11, 23),
+      '[${record.level.name}]',
       record.loggerName,
       record.message,
     ])));

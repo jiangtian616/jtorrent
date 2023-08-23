@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:collection/collection.dart';
+import 'package:jtorrent/src/dht/dht_manager.dart';
 import 'package:jtorrent/src/extension/uint8_list_extension.dart';
 import 'package:jtorrent/src/model/announce_response.dart';
 import 'package:jtorrent/src/peer/file/file_manager.dart';
@@ -51,6 +52,7 @@ class _TorrentTask extends TorrentTask implements AnnounceConfigProvider {
 
   late final StateFile _stateFile;
 
+  late final DHTManager _dhtManager;
   late final AnnounceManager _announceManager;
   late final PeerManager _peerManager;
   late final PieceManager _pieceManager;
@@ -99,21 +101,22 @@ class _TorrentTask extends TorrentTask implements AnnounceConfigProvider {
 
   @override
   Future<void> start() async {
-    assert(_paused == false);
-    assert(_serverSocket == null);
-
     if (_initialized) {
       return _initCompleter.future;
     }
     _initialized = true;
 
-    /// todo
     _serverSocket = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
-    _serverSocket!.listen((data) {});
+    _serverSocket!.listen(_processPeerSocket);
+    
+    _dhtManager = DHTManager();
+    await _dhtManager.start();
+    _dhtManager.addOnNewPeersFoundCallBack(_processNewPeersFoundByDHT);
+    _dhtManager.announcePeer(infoHash, _serverSocket!.port);
 
     _announceManager = AnnounceManager(announceConfigProvider: this);
     _announceManager.addTrackerServers(_torrent.allTrackers);
-    _announceManager.addOnNewPeersFoundCallback(_processOnNewPeers);
+    _announceManager.addOnNewPeersFoundCallback(_processNewPeersFoundByAnnounce);
 
     _stateFile = await StateFile.find(_savePath, _torrent);
     _pieceManager = PieceManager.fromTorrent(torrent: _torrent, bitField: _stateFile.bitField);
@@ -125,14 +128,20 @@ class _TorrentTask extends TorrentTask implements AnnounceConfigProvider {
       pieceManager: _pieceManager,
       fileManager: _fileManager,
     );
-    _peerManager.addOnPieceCompletedCallBack(_processPieceCompleted);
-    _peerManager.addOnCompletedCallBack(_processCompleted);
+    _peerManager.DHTPort = _dhtManager.port;
+    _peerManager.addOnPieceCompletedCallback(_processPieceCompleted);
+    _peerManager.addOnCompletedCallback(_processCompleted);
+    _peerManager.addOnDHTNodeFoundCallback(_processDHTNodeFound);
 
     await _stateFileHashCheck();
+
     if (_stateFile.status == DownloadStatus.completed) {
       _completed = true;
     } else {
       _announceManager.start();
+      _torrent.nodes?.forEach((node) {
+        _dhtManager.tryAddTorrentNode(node);
+      });
     }
 
     Log.info(
@@ -148,6 +157,7 @@ class _TorrentTask extends TorrentTask implements AnnounceConfigProvider {
     _paused = true;
 
     _peerManager.pause();
+    _dhtManager.pause();
   }
 
   @override
@@ -158,12 +168,41 @@ class _TorrentTask extends TorrentTask implements AnnounceConfigProvider {
     _paused = false;
 
     _peerManager.resume();
+    _dhtManager.resume();
   }
 
-  void _processOnNewPeers(AnnounceSuccessResponse response) {
+  void _processPeerSocket(Socket socket) {
+    Log.fine('New connection from ${socket.remoteAddress.address}:${socket.remotePort}');
+
+    if (socket.remoteAddress.isLinkLocal || socket.remoteAddress.isLoopback) {
+      Log.info('Ignore local connection: ${socket.remoteAddress.address}:${socket.remotePort}');
+      socket.close();
+      return;
+    }
+    
+    _peerManager.addIncomePeer(socket);
+  }
+
+  void _processNewPeersFoundByAnnounce(AnnounceSuccessResponse response) {
     for (Peer peer in response.peers) {
       _peerManager.addNewPeer(peer);
     }
+  }
+
+  void _processNewPeersFoundByDHT(Uint8List infoHash, List<Peer> peers) {
+    if (!ListEquality<int>().equals(infoHash, _torrent.infoHash)) {
+      return;
+    }
+
+    Log.fine('DHTManager found new peers for ${infoHash.toHexString}: $peers');
+    for (Peer peer in peers) {
+      _peerManager.addNewPeer(peer);
+    }
+  }
+
+  void _processDHTNodeFound(InternetAddress ip, int port) {
+    Log.fine('Found new DHT node: $ip:$port');
+    _dhtManager.tryAddNodeAddress(ip, port);
   }
 
   void _processPieceCompleted(Uint8List bitField) {

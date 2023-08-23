@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ffi';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
@@ -40,6 +41,8 @@ class PeerManager with PeerManagerEventDispatcher {
 
   bool _paused = false;
 
+  int? DHTPort;
+
   void addNewPeer(Peer peer) {
     if (_peerConnectionMap.containsKey(peer)) {
       return;
@@ -51,6 +54,23 @@ class PeerManager with PeerManagerEventDispatcher {
     _hookPeerConnection(connection);
 
     connection.connect();
+  }
+  
+  void addIncomePeer(Socket socket) {
+    Peer peer = Peer(ip: socket.remoteAddress, port: socket.remotePort);
+    
+    if (_peerConnectionMap.containsKey(peer)) {
+      Log.info('Peer ${peer.ip.address}:${peer.port} already connected');
+      socket.close();
+      return;
+    }
+
+    PeerConnection connection = _generatePeerConnection(peer);
+    _peerConnectionMap[peer] = connection;
+
+    _hookPeerConnection(connection);
+
+    connection.listen(socket);
   }
 
   void pause() {
@@ -105,6 +125,7 @@ class PeerManager with PeerManagerEventDispatcher {
     connection.addOnRequestMessageCallBack((message) => _processRequestMessage(connection, message));
     connection.addOnPieceMessageCallBack((message) => _processPieceMessage(connection, message));
     connection.addOnCancelMessageCallBack((message) => _processCancelMessage(connection, message));
+    connection.addOnPortMessageCallBack((message) => _processPortMessage(connection, message));
 
     connection.addOnRequestTimeoutCallBack((int pieceIndex, int subPieceIndex) => _processRequestTimeout(connection, pieceIndex, subPieceIndex));
   }
@@ -127,6 +148,7 @@ class PeerManager with PeerManagerEventDispatcher {
     connection.removeOnRequestMessageCallBack((message) => _processRequestMessage(connection, message));
     connection.removeOnPieceMessageCallBack((message) => _processPieceMessage(connection, message));
     connection.removeOnCancelMessageCallBack((message) => _processCancelMessage(connection, message));
+    connection.removeOnPortMessageCallBack((message) => _processPortMessage(connection, message));
 
     connection.removeOnRequestTimeoutCallBack((int pieceIndex, int subPieceIndex) => _processRequestTimeout(connection, pieceIndex, subPieceIndex));
   }
@@ -173,12 +195,8 @@ class PeerManager with PeerManagerEventDispatcher {
   }
 
   void _processHandshakeMessage(PeerConnection connection, HandshakeMessage message) {
-    Log.finest('Receive handshake message from ${connection.peer.ip.address}:${connection.peer.port}, info hash: ${message.infoHash.toHexString}');
-
-    if (connection.peerHaveHandshake) {
-      Log.info('${connection.peer.ip.address} handshake again');
-    }
-    connection.peerHaveHandshake = true;
+    Log.finest(
+        'Receive handshake message from ${connection.peer.ip.address}:${connection.peer.port}, info hash: ${message.infoHash.toHexString}, supportDHT: ${message.supportDHT}, supportExtension: ${message.supportExtension}');
 
     if (!ListEquality<int>().equals(message.infoHash, infoHash)) {
       Log.warning(
@@ -186,12 +204,20 @@ class PeerManager with PeerManagerEventDispatcher {
       return connection.close(illegal: true);
     }
 
+    if (connection.peerHaveHandshake) {
+      Log.info('${connection.peer.ip.address} handshake again');
+      return;
+    }
+
+    connection.peerHaveHandshake = true;
+    connection.supportDHT = message.supportDHT;
+    connection.supportExtension = message.supportExtension;
+
     if (connection.haveHandshake == false) {
       _sendHandshake(connection);
     }
-
     connection.sendBitField(_pieceManager.bitField);
-    connection.peerHaveSentBitField = true;
+    connection.haveSentBitField = true;
   }
 
   void _processKeepAliveMessage(PeerConnection connection, KeepAliveMessage message) {
@@ -270,6 +296,10 @@ class PeerManager with PeerManagerEventDispatcher {
 
     connection.peerHaveSentBitField = true;
 
+    if (connection.supportDHT && DHTPort != null) {
+      connection.sendPort(DHTPort!);
+    }
+    
     _tryRequestPiece(connection);
   }
 
@@ -324,7 +354,15 @@ class PeerManager with PeerManagerEventDispatcher {
     });
   }
 
-  void _processCancelMessage(PeerConnection connection, CancelMessage message) {}
+  void _processCancelMessage(PeerConnection connection, CancelMessage message) {
+    Log.info(
+        'Receive cancel message from ${connection.peer.ip.address}:${connection.peer.port}, index: ${message.index}, begin: ${message.begin}, length: ${message.length}');
+  }
+
+  void _processPortMessage(PeerConnection connection, PortMessage message) {
+    Log.finest('Receive port message from ${connection.peer.ip.address}:${connection.peer.port}, port: ${message.port}');
+    _fireOnDHTNodeFoundCallbacks(connection.peer.ip, message.port);
+  }
 
   void _processRequestTimeout(PeerConnection connection, int pieceIndex, int subPieceIndex) {
     Log.finest('Request ${connection.peer.ip.address}:${connection.peer.port} timeout, pieceIndex: $pieceIndex, subPieceIndex: $subPieceIndex');
@@ -349,7 +387,7 @@ class PeerManager with PeerManagerEventDispatcher {
     for (PeerConnection connection in activeConnections) {
       bool removed = connection.cancelPendingRequest(pieceIndex, begin ~/ CommonConstants.subPieceLength);
       if (removed) {
-        Log.fine(
+        Log.finest(
             'Cancel pending request because downloaded from other peer, pieceIndex: $pieceIndex, subPieceIndex: ${begin ~/ CommonConstants.subPieceLength}');
         _tryRequestPiece(connection);
       }
@@ -370,7 +408,7 @@ class PeerManager with PeerManagerEventDispatcher {
     //   connection.sendHaveMessage(pieceIndex);
     // }
 
-    _fireOnPieceCompletedCallBacks(_pieceManager.bitField);
+    _fireOnPieceCompletedCallbacks(_pieceManager.bitField);
   }
 
   void _processPieceHashCheckFailed(int pieceIndex) {
@@ -398,7 +436,7 @@ class PeerManager with PeerManagerEventDispatcher {
   void _processCompleteSuccess() {
     Log.info('Complete ${infoHash.toHexString} success');
 
-    _fireOnCompletedCallBacks();
+    _fireOnCompletedCallbacks();
   }
 
   void _processCompleteFailed(dynamic error) {
@@ -408,7 +446,7 @@ class PeerManager with PeerManagerEventDispatcher {
   }
 
   void _sendHandshake(PeerConnection connection) {
-    connection.sendHandShake(infoHash);
+    connection.sendHandShake(infoHash, DHTPort != null, false);
     connection.haveHandshake = true;
   }
 
@@ -475,35 +513,53 @@ class PeerManager with PeerManagerEventDispatcher {
 }
 
 mixin PeerManagerEventDispatcher {
-  final Set<void Function(Uint8List)> _onPieceCompletedCallBacks = {};
-  final Set<void Function()> _onCompletedCallBacks = {};
+  final Set<void Function(InternetAddress ip, int port)> _onDHTNodeFoundCallbacks = {};
 
-  void addOnPieceCompletedCallBack(void Function(Uint8List) callBack) {
-    _onPieceCompletedCallBacks.add(callBack);
+  final Set<void Function(Uint8List)> _onPieceCompletedCallbacks = {};
+  final Set<void Function()> _onCompletedCallbacks = {};
+
+  void addOnDHTNodeFoundCallback(void Function(InternetAddress ip, int port) callBack) {
+    _onDHTNodeFoundCallbacks.add(callBack);
   }
 
-  bool removeOnPieceCompletedCallBack(void Function(Uint8List) callBack) {
-    return _onPieceCompletedCallBacks.remove(callBack);
+  bool removeOnDHTNodeFoundCallback(void Function(InternetAddress ip, int port) callBack) {
+    return _onDHTNodeFoundCallbacks.remove(callBack);
   }
 
-  void _fireOnPieceCompletedCallBacks(Uint8List piece) {
-    for (void Function(Uint8List) callBack in _onPieceCompletedCallBacks) {
+  void _fireOnDHTNodeFoundCallbacks(InternetAddress ip, int port) {
+    for (var callBack in _onDHTNodeFoundCallbacks) {
+      Timer.run(() {
+        callBack(ip, port);
+      });
+    }
+  }
+
+  void addOnPieceCompletedCallback(void Function(Uint8List) callBack) {
+    _onPieceCompletedCallbacks.add(callBack);
+  }
+
+  bool removeOnPieceCompletedCallback(void Function(Uint8List) callBack) {
+    return _onPieceCompletedCallbacks.remove(callBack);
+  }
+
+  void _fireOnPieceCompletedCallbacks(Uint8List piece) {
+    for (void Function(Uint8List) callBack in _onPieceCompletedCallbacks) {
       Timer.run(() {
         callBack(piece);
       });
     }
   }
 
-  void addOnCompletedCallBack(void Function() callBack) {
-    _onCompletedCallBacks.add(callBack);
+  void addOnCompletedCallback(void Function() callBack) {
+    _onCompletedCallbacks.add(callBack);
   }
 
-  bool removeOnCompletedCallBack(void Function() callBack) {
-    return _onCompletedCallBacks.remove(callBack);
+  bool removeOnCompletedCallback(void Function() callBack) {
+    return _onCompletedCallbacks.remove(callBack);
   }
 
-  void _fireOnCompletedCallBacks() {
-    for (void Function() callBack in _onCompletedCallBacks) {
+  void _fireOnCompletedCallbacks() {
+    for (void Function() callBack in _onCompletedCallbacks) {
       Timer.run(() {
         callBack();
       });

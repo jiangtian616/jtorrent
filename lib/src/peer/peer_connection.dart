@@ -15,7 +15,6 @@ abstract class PeerConnection with PeerConnectionEventDispatcher {
 
   final Peer peer;
 
-  bool connecting = false;
   bool connected = false;
   bool illegal = false;
 
@@ -31,6 +30,9 @@ abstract class PeerConnection with PeerConnectionEventDispatcher {
   bool peerChoking = true;
   bool peerInterested = false;
 
+  bool supportDHT = false;
+  bool supportExtension = false;
+
   final Map<({int pieceIndex, int subPieceIndex}), ({int length, Timer timer})> pendingRequests = {};
 
   Timer? _keepAliveTimer;
@@ -40,9 +42,11 @@ abstract class PeerConnection with PeerConnectionEventDispatcher {
 
   Future<void> connect();
 
+  Future<void> listen(Socket socket);
+
   void close({bool illegal = false});
 
-  void sendHandShake(Uint8List infoHash);
+  void sendHandShake(Uint8List infoHash, bool supportDHT, bool supportExtension);
 
   void sendKeepAlive();
 
@@ -57,6 +61,8 @@ abstract class PeerConnection with PeerConnectionEventDispatcher {
   void sendBitField(Uint8List bitField);
 
   void sendHaveMessage(int pieceIndex);
+
+  void sendPort(int port);
 
   List<({int pieceIndex, int subPieceIndex})> clearPendingRequests() {
     for (var entry in pendingRequests.entries) {
@@ -93,8 +99,8 @@ abstract class PeerConnection with PeerConnectionEventDispatcher {
   }
 
   void _countDownKeepAliveTimer() {
-    _peerKeepAliveTimer?.cancel();
-    _peerKeepAliveTimer = Timer(maxIdleTime, () {
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = Timer(maxIdleTime, () {
       sendKeepAlive();
     });
   }
@@ -144,9 +150,8 @@ class TcpPeerConnection extends PeerConnection {
 
   @override
   Future<void> connect() async {
-    assert(!connecting && !connected);
+    assert(!connected);
 
-    connecting = true;
     _socket?.close();
     _buffer.clear();
 
@@ -176,13 +181,39 @@ class TcpPeerConnection extends PeerConnection {
   }
 
   @override
-  void sendHandShake(Uint8List infoHash) {
+  Future<void> listen(Socket socket) async {
+    assert(!connected);
+
+    _socket?.close();
+    _buffer.clear();
+
+    _socket = socket;
+
+    connected = true;
+
+    _socket!.listen(
+      (data) => _handleNewResponseData(data),
+      onError: (Object error, StackTrace stackTrace) {
+        close();
+        _fireOnConnectInterruptedCallBack(error);
+      },
+      onDone: () {
+        close();
+        _fireOnDisconnectedCallBack();
+      },
+    );
+
+    _countDownKeepAliveTimer();
+  }
+
+  @override
+  void sendHandShake(Uint8List infoHash, bool supportDHT, bool supportExtension) {
     assert(haveHandshake == false);
     assert(_socket != null);
 
     Log.finest('send handshake to ${peer.ip.address}:${peer.port}');
 
-    _sendMessage(HandshakeMessage.noExtension(infoHash: infoHash));
+    _sendMessage(HandshakeMessage(infoHash: infoHash, supportDHT: supportDHT, supportExtension: supportExtension));
   }
 
   @override
@@ -193,7 +224,7 @@ class TcpPeerConnection extends PeerConnection {
 
     _sendMessage(KeepAliveMessage.instance);
   }
-  
+
   @override
   void sendUnChoke() {
     assert(_socket != null);
@@ -233,7 +264,7 @@ class TcpPeerConnection extends PeerConnection {
   void sendCancel(int pieceIndex, int subPieceIndex, int length) {
     assert(_socket != null);
 
-    Log.fine('send cancel to ${peer.ip.address}:${peer.port} for piece: $pieceIndex subPieceIndex: $subPieceIndex length: $length');
+    Log.finest('send cancel to ${peer.ip.address}:${peer.port} for piece: $pieceIndex subPieceIndex: $subPieceIndex length: $length');
 
     _sendMessage(CancelMessage(index: pieceIndex, begin: subPieceIndex * CommonConstants.subPieceLength, length: length));
   }
@@ -258,8 +289,16 @@ class TcpPeerConnection extends PeerConnection {
   }
 
   @override
+  void sendPort(int port) {
+    assert(_socket != null);
+
+    Log.finest('send port message to ${peer.ip.address}:${peer.port} for port: $port');
+
+    _sendMessage(PortMessage(port: port));
+  }
+
+  @override
   void close({bool illegal = false}) {
-    connecting = false;
     connected = false;
     this.illegal = illegal;
 
@@ -278,7 +317,7 @@ class TcpPeerConnection extends PeerConnection {
     } on Object catch (e) {
       _fireOnSendMessageFailedCallBack(e);
     }
-    
+
     _countDownKeepAliveTimer();
   }
 
@@ -441,6 +480,13 @@ class TcpPeerConnection extends PeerConnection {
         } else {
           return _fireOnCancelMessageCallBack(CancelMessage.fromBuffer(segment));
         }
+      case PortMessage.typeId:
+        if (length != 3) {
+          _fireOnIllegalMessageCallBack(IllegalMessage(message: 'Invalid port message length $length'));
+          break;
+        } else {
+          return _fireOnPortMessageCallBack(PortMessage.fromBuffer(segment));
+        }
       default:
         _fireOnIllegalMessageCallBack(IllegalMessage(message: 'Unknown message type id: $typeId'));
     }
@@ -485,6 +531,7 @@ mixin PeerConnectionEventDispatcher {
   final Set<void Function(RequestMessage)> _onRequestMessageCallBacks = {};
   final Set<void Function(PieceMessage)> _onPieceMessageCallBacks = {};
   final Set<void Function(CancelMessage)> _onCancelMessageCallBacks = {};
+  final Set<void Function(PortMessage)> _onPortMessageCallBacks = {};
 
   final Set<void Function(int pieceIndex, int subPieceIndex)> _onRequestTimeoutCallBacks = {};
 
@@ -696,6 +743,18 @@ mixin PeerConnectionEventDispatcher {
     for (var callback in _onRequestTimeoutCallBacks) {
       Timer.run(() {
         callback(pieceIndex, subPieceIndex);
+      });
+    }
+  }
+
+  void addOnPortMessageCallBack(void Function(PortMessage) callback) => _onPortMessageCallBacks.add(callback);
+
+  bool removeOnPortMessageCallBack(void Function(PortMessage) callback) => _onPortMessageCallBacks.remove(callback);
+
+  void _fireOnPortMessageCallBack(PortMessage message) {
+    for (var callback in _onPortMessageCallBacks) {
+      Timer.run(() {
+        callback(message);
       });
     }
   }

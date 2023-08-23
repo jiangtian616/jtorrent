@@ -115,9 +115,9 @@ class AnnouncePeerMessage extends QueryMessage {
   final Uint8List infoHash;
   final int port;
   final bool impliedPort;
-  final Uint8List token;
+  final Uint8List? token;
 
-  AnnouncePeerMessage({required this.id, required this.infoHash, required this.port, required this.impliedPort, required this.token})
+  AnnouncePeerMessage({required this.id, required this.infoHash, required this.port, required this.impliedPort, this.token})
       : super(
           method: methodAnnouncePeer,
           arguments: {
@@ -125,7 +125,7 @@ class AnnouncePeerMessage extends QueryMessage {
             keyInfoHash: infoHash,
             keyPort: port,
             keyImpliedPort: impliedPort,
-            keyToken: token,
+            if (token != null) keyToken: token,
           },
         );
 

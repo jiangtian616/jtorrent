@@ -13,10 +13,10 @@ void main() {
   group(
     'download',
     () {
-      hierarchicalLoggingEnabled = true;
-      Log.level = Level.FINEST;
-
       test('manga', () async {
+        hierarchicalLoggingEnabled = true;
+        Log.level = Level.FINEST;
+
         Torrent torrent = Torrent.fromFileSync(File('/Users/JTMonster/IdeaProjects/jtorrent/test/torrent/manga.torrent'));
         TorrentTask torrentTask = TorrentTask.fromTorrent(torrent, 'C:\\Users\\JTMonster\\IdeaProjects\\jtorrent\\test\\torrent');
         // TorrentTask torrentTask = TorrentTask.fromTorrent(torrent, '/Users/JTMonster/IdeaProjects/jtorrent/test/torrent');
@@ -41,12 +41,11 @@ void main() {
         Torrent torrent = Torrent.fromFileSync(File('/Users/JTMonster/IdeaProjects/jtorrent/test/torrent/manga.torrent'));
 
         DHTManager dhtManager = DHTManager();
-        int port = await dhtManager.start();
-        Log.info('dht port: $port');
 
         /// eaf301acac97b88f69c1c0e7cb83928f107
-        dhtManager.addNeededInfoHash(torrent.infoHash);
-        dhtManager.tryAddNodeAddress(InternetAddress('126.145.242.222'), 6881);
+        dhtManager.announcePeer(torrent.infoHash, 12315);
+        await dhtManager.start();
+        dhtManager.tryAddNodeAddress(InternetAddress('139.208.158.29'), 21437);
 
         Timer.periodic(Duration(seconds: 1), (_) {
           dhtManager.printDebugInfo();

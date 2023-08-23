@@ -44,18 +44,14 @@ class HandshakeMessage implements PeerMessage {
   /// 20 bytes, same as peer_id e when announce
   final Uint8List peerId;
 
-  HandshakeMessage._({
-    required this.pStrlen,
-    required this.pStr,
-    required this.reserved,
-    required this.infoHash,
-    required this.peerId,
-  });
+  bool get supportDHT => reserved[7] & 0x01 == 1;
 
-  HandshakeMessage.noExtension({required this.infoHash})
+  bool get supportExtension => reserved[5] & 0x10 == 1;
+
+  HandshakeMessage({required this.infoHash, bool supportDHT = false, bool supportExtension = false})
       : pStrlen = defaultPStrlen,
         pStr = defaultPStr,
-        reserved = Uint8List.fromList([0, 0, 0, 0, 0, 0, 0, 0]),
+        reserved = Uint8List.fromList([0, 0, 0, 0, 0, supportExtension ? 0x10 : 0, 0, supportDHT ? 1 : 0]),
         peerId = CommonUtil.generateLocalPeerId(infoHash);
 
   factory HandshakeMessage.fromBuffer(List<int> buffer) {
@@ -68,12 +64,20 @@ class HandshakeMessage implements PeerMessage {
     );
   }
 
+  HandshakeMessage._({
+    required this.pStrlen,
+    required this.pStr,
+    required this.reserved,
+    required this.infoHash,
+    required this.peerId,
+  });
+
   @override
   Uint8List get toUint8List => Uint8List.fromList([pStrlen, ...ascii.encode(pStr), ...reserved, ...infoHash, ...peerId]);
 
   @override
   String toString() {
-    return 'HandshakeMessage{pStrlen: $pStrlen, pStr: $pStr, reserved: $reserved, infoHash: ${infoHash.toHexString}, peerId: ${String.fromCharCodes(peerId)}';
+    return 'HandshakeMessage{infoHash: ${infoHash.toHexString}, peerId: ${String.fromCharCodes(peerId)}, supportDHT: $supportDHT, supportExtension: $supportExtension}';
   }
 }
 
@@ -348,5 +352,25 @@ class CancelMessage implements PeerMessage {
   @override
   String toString() {
     return 'CancelMessage{index: $index, begin: $begin, length: $length}';
+  }
+}
+
+class PortMessage implements PeerMessage {
+  static const int typeId = 9;
+
+  final int port;
+
+  const PortMessage({required this.port});
+
+  factory PortMessage.fromBuffer(List<int> buffer) {
+    return PortMessage(port: (buffer[5] << 8) + buffer[6]);
+  }
+
+  @override
+  Uint8List get toUint8List => Uint8List.fromList([0, 0, 0, 3, typeId, port >> 8, port & 0xff]);
+
+  @override
+  String toString() {
+    return 'PortMessage{listenPort: $port}';
   }
 }
