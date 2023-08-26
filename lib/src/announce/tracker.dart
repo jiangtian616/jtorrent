@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:jtorrent/src/extension/uint8_list_extension.dart';
+import 'package:jtorrent/src/util/log_util.dart';
+
 import '../exception/announce_exception.dart';
 import '../model/announce_response.dart';
 import 'announce_request_options_provider.dart';
@@ -80,6 +83,7 @@ abstract class Tracker with TrackerEventDispatcher {
 
     AnnounceResponse response;
     try {
+      Log.finest('Announce to $uri for ${announceConfigProvider.infoHash.toHexString}');
       response = await announceOnce(AnnounceEventType.started);
     } catch (e) {
       _fireOnAnnounceErrorCallback(e);

@@ -16,7 +16,8 @@ dependencies:
   logging: ^1.2.0
   collection: ^1.18.0
   sprintf: ^7.0.0
-  
+  sortedmap: ^0.5.3
+
 dependency_overrides:
   jtorrent_bencoding:
     path: ../jtorrent_bencoding

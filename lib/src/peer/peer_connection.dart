@@ -15,6 +15,8 @@ abstract class PeerConnection with PeerConnectionEventDispatcher {
 
   final Peer peer;
 
+  bool fromClient = false;
+
   bool connected = false;
   bool illegal = false;
 

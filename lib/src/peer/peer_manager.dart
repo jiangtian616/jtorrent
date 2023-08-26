@@ -31,6 +31,9 @@ class PeerManager with PeerManagerEventDispatcher {
 
   static const int maxTimeoutTimesPerPeer = 2;
 
+  static const int maxOutgoingConnections = 30;
+  static const int maxIncomingConnections = 5;
+
   final Uint8List infoHash;
 
   final PieceManager _pieceManager;
@@ -55,18 +58,25 @@ class PeerManager with PeerManagerEventDispatcher {
 
     connection.connect();
   }
-  
+
   void addIncomePeer(Socket socket) {
     Peer peer = Peer(ip: socket.remoteAddress, port: socket.remotePort);
-    
+
     if (_peerConnectionMap.containsKey(peer)) {
       Log.info('Peer ${peer.ip.address}:${peer.port} already connected');
       socket.close();
       return;
     }
 
+    if (activeInComingConnectionsCount >= maxIncomingConnections) {
+      Log.info('Incoming connections reach max: $maxIncomingConnections, ignore ${peer.ip.address}:${peer.port}');
+      socket.close();
+      return;
+    }
+
     PeerConnection connection = _generatePeerConnection(peer);
     _peerConnectionMap[peer] = connection;
+    connection.fromClient = true;
 
     _hookPeerConnection(connection);
 
@@ -100,6 +110,8 @@ class PeerManager with PeerManagerEventDispatcher {
       activeConnections.where((element) => element.peerHaveSentBitField).where((element) => element.peerChoking == false).toList();
 
   List<PeerConnection> get noTimeoutConnections => availableConnections.where((element) => element.timeoutTimes < maxTimeoutTimesPerPeer).toList();
+
+  int get activeInComingConnectionsCount => activeConnections.where((element) => element.fromClient).length;
 
   PeerConnection _generatePeerConnection(Peer peer) {
     /// todo
@@ -172,6 +184,8 @@ class PeerManager with PeerManagerEventDispatcher {
 
     _resetConnectionPendingRequest(connection);
     _unHookPeerConnection(connection);
+    
+    _pieceManager.removePeerPieces(connection.peer);
   }
 
   void _processDisconnected(PeerConnection connection) {
@@ -179,6 +193,8 @@ class PeerManager with PeerManagerEventDispatcher {
 
     _resetConnectionPendingRequest(connection);
     _unHookPeerConnection(connection);
+
+    _pieceManager.removePeerPieces(connection.peer);
   }
 
   void _processSendMessageFailed(PeerConnection connection, error) {
@@ -299,7 +315,7 @@ class PeerManager with PeerManagerEventDispatcher {
     if (connection.supportDHT && DHTPort != null) {
       connection.sendPort(DHTPort!);
     }
-    
+
     _tryRequestPiece(connection);
   }
 
@@ -487,8 +503,7 @@ class PeerManager with PeerManagerEventDispatcher {
       return;
     }
 
-    ({int pieceIndex, int subPieceIndex, int length})? subPiece =
-        _pieceManager.selectPieceIndexToDownload(connection.peer, connection.pendingRequests.keys.toList());
+    ({int pieceIndex, int subPieceIndex, int length})? subPiece = _pieceManager.selectPieceIndexToDownload(connection.peer);
     if (subPiece == null) {
       Log.finest(
           'Ignore piece request because no piece to request to ${connection.peer.ip.address}:${connection.peer.port} of ${infoHash.toHexString}');

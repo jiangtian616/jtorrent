@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:typed_data';
 
 import 'package:jtorrent/src/model/peer.dart';
 import 'package:jtorrent/src/model/torrent.dart';
 import 'package:jtorrent/src/peer/piece/piece.dart';
 import 'package:jtorrent/src/util/common_util.dart';
+import 'package:sortedmap/sortedmap.dart';
 
 class PieceManager with PieceManagerEventDispatcher {
   final Uint8List infoHash;
@@ -17,6 +19,8 @@ class PieceManager with PieceManagerEventDispatcher {
 
   final List<Piece> _localPieces;
 
+  final SortedMap<int, int> _piece2PeerCount = SortedMap(Ordering.byValue());
+
   PieceManager.fromTorrent({required Torrent torrent, Uint8List? bitField})
       : this._(
           infoHash: torrent.infoHash,
@@ -26,9 +30,13 @@ class PieceManager with PieceManagerEventDispatcher {
           bitField: bitField,
         );
 
-  PieceManager._(
-      {required this.infoHash, required int totalBytes, required this.pieceLength, required List<Uint8List> pieceSha1s, Uint8List? bitField})
-      : pieceCount = pieceSha1s.length,
+  PieceManager._({
+    required this.infoHash,
+    required int totalBytes,
+    required this.pieceLength,
+    required List<Uint8List> pieceSha1s,
+    Uint8List? bitField,
+  })  : pieceCount = pieceSha1s.length,
         _localPieces = List.generate(
           pieceSha1s.length,
           (index) => Piece(
@@ -36,7 +44,11 @@ class PieceManager with PieceManagerEventDispatcher {
             pieceHash: pieceSha1s[index],
             completed: bitField == null ? false : CommonUtil.getValueFromBitmap(bitField, index),
           ),
-        );
+        ) {
+    for (int i = 0; i < pieceCount; i++) {
+      _piece2PeerCount[i] = 0;
+    }
+  }
 
   int get subPieceCount => _localPieces.first.subPiecesCount;
 
@@ -50,10 +62,17 @@ class PieceManager with PieceManagerEventDispatcher {
 
   int get downloadedPieceCount => _localPieces.where((piece) => piece.completed).length;
 
-  int get downloadedBytes => _localPieces.where((piece) => piece.completed).fold<int>(0, (previousValue, element) => previousValue + element.pieceLength);
+  int get downloadedBytes =>
+      _localPieces.where((piece) => piece.completed).fold<int>(0, (previousValue, element) => previousValue + element.pieceLength);
 
   void initPeerPieces(Peer peer) {
     _peerPieces[peer] ??= List.filled(pieceCount, false);
+
+    for (int pieceIndex = 0; pieceIndex < _peerPieces[peer]!.length; pieceIndex++) {
+      if (_peerPieces[peer]![pieceIndex]) {
+        _piece2PeerCount.update(pieceIndex, (value) => value + 1);
+      }
+    }
   }
 
   void updatePeerPiece(Peer peer, int pieceIndex, bool isDownloaded) {
@@ -61,6 +80,19 @@ class PieceManager with PieceManagerEventDispatcher {
     assert(_peerPieces[peer] != null);
 
     _peerPieces[peer]![pieceIndex] = isDownloaded;
+    _piece2PeerCount.update(pieceIndex, (value) => value + 1);
+  }
+
+  void removePeerPieces(Peer peer) {
+    List<bool>? bitField = _peerPieces.remove(peer);
+
+    if (bitField != null) {
+      for (int pieceIndex = 0; pieceIndex < bitField.length; pieceIndex++) {
+        if (bitField[pieceIndex]) {
+          _piece2PeerCount.update(pieceIndex, (value) => value - 1);
+        }
+      }
+    }
   }
 
   void resetLocalSubPiece(int index, int subPieceIndex) {
@@ -87,14 +119,11 @@ class PieceManager with PieceManagerEventDispatcher {
     _localPieces[index].updateSubPiece(subPieceIndex, status);
   }
 
-  ({int pieceIndex, int subPieceIndex, int length})? selectPieceIndexToDownload(
-      Peer peer, List<({int pieceIndex, int subPieceIndex})> excludePieces) {
+  ({int pieceIndex, int subPieceIndex, int length})? selectPieceIndexToDownload(Peer peer) {
     assert(_peerPieces[peer] != null);
 
-    /// todo
-
-    /// find a sub piece that is not being downloaded
-    for (int pieceIndex = 0; pieceIndex < _peerPieces[peer]!.length; pieceIndex++) {
+    /// find a sub piece that is not being downloaded with rarest first strategy
+    for (int pieceIndex in _piece2PeerCount.keys) {
       if (!_peerPieces[peer]![pieceIndex]) {
         continue;
       }
@@ -103,15 +132,14 @@ class PieceManager with PieceManagerEventDispatcher {
       }
 
       for (int subPieceIndex = 0; subPieceIndex < _localPieces[pieceIndex].subPiecesCount; subPieceIndex++) {
-        if (_localPieces[pieceIndex].subPieces[subPieceIndex] == PieceStatus.none &&
-            !excludePieces.contains((pieceIndex: pieceIndex, subPieceIndex: subPieceIndex))) {
+        if (_localPieces[pieceIndex].subPieces[subPieceIndex] == PieceStatus.none) {
           return (pieceIndex: pieceIndex, subPieceIndex: subPieceIndex, length: _localPieces[pieceIndex].subPieceLength(subPieceIndex));
         }
       }
     }
 
     /// Endgame mode: find a sub piece that is being downloaded
-    for (int pieceIndex = 0; pieceIndex < _peerPieces[peer]!.length; pieceIndex++) {
+    for (int pieceIndex in _piece2PeerCount.keys) {
       if (!_peerPieces[peer]![pieceIndex]) {
         continue;
       }
@@ -120,8 +148,7 @@ class PieceManager with PieceManagerEventDispatcher {
       }
 
       for (int subPieceIndex = 0; subPieceIndex < _localPieces[pieceIndex].subPiecesCount; subPieceIndex++) {
-        if (_localPieces[pieceIndex].subPieces[subPieceIndex] == PieceStatus.downloading &&
-            !excludePieces.contains((pieceIndex: pieceIndex, subPieceIndex: subPieceIndex))) {
+        if (_localPieces[pieceIndex].subPieces[subPieceIndex] == PieceStatus.downloading) {
           return (pieceIndex: pieceIndex, subPieceIndex: subPieceIndex, length: _localPieces[pieceIndex].subPieceLength(subPieceIndex));
         }
       }
