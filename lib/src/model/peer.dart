@@ -25,12 +25,9 @@ class Peer {
     return Uint8List.fromList(list);
   }
 
-  static List<Peer> parseCompactList(Uint8List? rawPeers) {
-    if (rawPeers == null) {
-      return [];
-    }
-
+  static List<Peer> parseCompactList(Uint8List rawPeers) {
     List<Peer> peers = [];
+
     for (int i = 0; i < rawPeers.length; i += 6) {
       final ip = InternetAddress.fromRawAddress(rawPeers.sublist(i, i + 4));
       final port = (rawPeers[i + 4] << 8) + rawPeers[i + 5];
@@ -38,6 +35,17 @@ class Peer {
     }
 
     return peers;
+  }
+
+  static List<Peer> parseUnCompactPeers(List rawPeers) {
+    return rawPeers.cast<Uint8List>().map(
+      (Uint8List bytes) {
+        if (bytes.length == 6) {
+          return Peer(ip: InternetAddress.fromRawAddress(bytes.sublist(0, 4)), port: (bytes[4] << 8) + bytes[5]);
+        }
+        return Peer(ip: InternetAddress.fromRawAddress(bytes.sublist(0, 16)), port: (bytes[16] << 8) + bytes[17]);
+      },
+    ).toList();
   }
 
   @override

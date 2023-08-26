@@ -35,7 +35,7 @@ void main() {
     'dht',
     () {
       hierarchicalLoggingEnabled = true;
-      Log.level = Level.FINEST;
+      Log.level = Level.FINE;
 
       test('dht', () async {
         Torrent torrent = Torrent.fromFileSync(File('/Users/JTMonster/IdeaProjects/jtorrent/test/torrent/manga.torrent'));
@@ -43,9 +43,9 @@ void main() {
         DHTManager dhtManager = DHTManager();
 
         /// eaf301acac97b88f69c1c0e7cb83928f107
-        dhtManager.announcePeer(torrent.infoHash, 12315);
+        dhtManager.announcePeer(torrent.infoHash, 6881);
         await dhtManager.start();
-        dhtManager.tryAddNodeAddress(InternetAddress('139.208.158.29'), 21437);
+        dhtManager.tryAddNodeAddress(InternetAddress('210.171.153.176'), 11822);
 
         Timer.periodic(Duration(seconds: 1), (_) {
           dhtManager.printDebugInfo();

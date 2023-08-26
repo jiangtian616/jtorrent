@@ -167,6 +167,11 @@ class _DHTManager extends DHTManager {
       return Log.fine('DHT is paused, ignoring add torrent node message');
     }
 
+    if (ip.type == InternetAddressType.IPv6) {
+      Log.fine('Ignore IPv6 address for DHT: $ip');
+      return;
+    }
+
     if (_containsNodeAddress(ip, port)) {
       return;
     }
@@ -362,13 +367,17 @@ class _DHTManager extends DHTManager {
           Log.warning('Received invalid nodes: $rawNodes');
           return;
         }
-        if (rawPeers != null && rawPeers is! Uint8List) {
+        if (rawPeers != null && rawPeers is! List) {
           Log.warning('Received invalid peers: $rawPeers');
           return;
         }
 
         List<DHTNode> nodes = DHTNode.parseCompactList(rawNodes);
-        List<Peer> peers = Peer.parseCompactList(rawPeers);
+        List<Peer> peers = rawPeers == null
+            ? []
+            : rawPeers is Uint8List
+                ? Peer.parseCompactList(rawPeers)
+                : Peer.parseUnCompactPeers(rawPeers);
 
         return _processResponseMessage(
           ResponseMessage(
@@ -427,9 +436,7 @@ class _DHTManager extends DHTManager {
     }
     message.tid = tid;
 
-    if (message is! AnnouncePeerMessage) {
-      _pendingTransactions[tid.toHexString] = (message: message, timer: Timer(queryTimeout, () => _resendQueryMessageOnce(tid, ip, port)));
-    }
+    _pendingTransactions[tid.toHexString] = (message: message, timer: Timer(queryTimeout, () => _resendQueryMessageOnce(tid, ip, port)));
 
     Log.finest('Sending $message to ${ip.address}:$port, tid:$tid');
 
@@ -489,17 +496,15 @@ class _DHTManager extends DHTManager {
     }
 
     int times = 0;
-    while ((await _serialRunner.run(() => _socket.send(bytes, ip, port))) == 0) {
-      if (times++ >= 5) {
+    while (_socket.send(bytes, ip, port) == 0) {
+      if (times++ >= 3) {
         Log.warning('Failed to send message to ${ip.address}:$port, giving up');
         return;
       }
 
-      await Future.delayed(Duration(milliseconds: Random().nextInt(3000)));
+      await Future.delayed(Duration(milliseconds: 50));
       Log.fine('Failed to send message to ${ip.address}:$port, retrying for $times time');
     }
-
-    Log.fine('Success to send message to ${ip.address}:$port');
   }
 
   Future<void> _processPingMessage(PingMessage pingMessage, InternetAddress ip, int port) async {
@@ -568,6 +573,8 @@ class _DHTManager extends DHTManager {
         return _processFindNodeResponse(record.message as FindNodeMessage, response);
       case GetPeersMessage:
         return _processGetPeersResponse(record.message as GetPeersMessage, response);
+      case AnnouncePeerMessage:
+        return _processAnnouncePeerResponse(record.message as AnnouncePeerMessage, response);
       default:
         Log.severe('DHT received unknown message type: ${record.message.runtimeType}');
     }
@@ -624,7 +631,7 @@ class _DHTManager extends DHTManager {
     }
 
     if (response.peers != null && response.peers!.isNotEmpty) {
-      Log.info('DHT received ${response.peers!.length} peers from ${response.node}');
+      Log.info('DHT received peers from ${response.node}: ${response.peers}');
 
       (_infoHashTable[message.infoHash.toHexString] ??= []).addAll(response.peers!);
       _fireOnNewPeersFoundCallBack(message.infoHash, response.peers!);
@@ -638,10 +645,19 @@ class _DHTManager extends DHTManager {
 
     int? port = _downloadingInfoHashes[message.infoHash.toHexString];
     if (port != null) {
-      _sendAnnouncePeer(node, message.infoHash, port, false);
+      _sendAnnouncePeer(node, message.infoHash, port, true);
     }
   }
+  
+  void _processAnnouncePeerResponse(AnnouncePeerMessage message, ResponseMessage response) {
+    Log.finest('DHT received announce peer response: $response');
 
+    if (response.nodes == null) {
+      Log.warning('DHT received announce peer response but no nodes found');
+      return;
+    }
+  }
+  
   bool _addNodeAndRequire(DHTNode node) {
     if (!_addNodeAndSplit(node)) {
       return false;
@@ -667,7 +683,7 @@ class _DHTManager extends DHTManager {
     Log.finest('DHT added node: $node');
 
     while (_selfNode.bucket!.size >= Bucket.maxBucketSize) {
-      Log.fine('DHT bucket is full, splitting bucket: ${_selfNode.bucket.hashCode}');
+      Log.finest('DHT bucket is full, splitting bucket: ${_selfNode.bucket.hashCode}');
       _selfNode.bucket!.split();
     }
 
